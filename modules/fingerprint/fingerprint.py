@@ -15,6 +15,17 @@ import re
 
 import requests
 
+PLUGIN_METADATA = {
+    "name": "fingerprint",
+    "description": "Technology fingerprinting",
+    "version": "0.1.0",
+    "author": "SentinelAI",
+    "priority": 20,
+    "enabled": True,
+    "scan_type": "fingerprint",
+}
+
+
 TIMEOUT = 8
 USER_AGENT = "SentinelAI-Fingerprint/0.1 (authorized-assessment)"
 

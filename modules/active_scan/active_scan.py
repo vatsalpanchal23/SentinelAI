@@ -28,6 +28,17 @@ import re
 import shutil
 import subprocess
 
+PLUGIN_METADATA = {
+    "name": "active_scan",
+    "description": "Optional active scanner integration",
+    "version": "0.1.0",
+    "author": "SentinelAI",
+    "priority": 80,
+    "enabled": True,
+    "scan_type": "active",
+}
+
+
 NUCLEI_TIMEOUT_SECONDS = 300
 SQLMAP_TIMEOUT_SECONDS = 300
 

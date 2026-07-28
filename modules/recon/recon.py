@@ -14,6 +14,17 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
+PLUGIN_METADATA = {
+    "name": "recon",
+    "description": "Baseline reconnaissance and TLS/header collection",
+    "version": "0.1.0",
+    "author": "SentinelAI",
+    "priority": 10,
+    "enabled": True,
+    "scan_type": "recon",
+}
+
+
 TIMEOUT = 8
 USER_AGENT = "SentinelAI-Recon/0.1 (authorized-assessment)"
 

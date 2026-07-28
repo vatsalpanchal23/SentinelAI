@@ -16,6 +16,17 @@ from config.settings import Config
 from scoring import compute_risk, SEVERITIES
 from ai.correlation import analyze as ai_analyze
 
+PLUGIN_METADATA = {
+    "name": "reporting",
+    "description": "HTML report generation",
+    "version": "0.1.0",
+    "author": "SentinelAI",
+    "priority": 90,
+    "enabled": True,
+    "scan_type": "reporting",
+}
+
+
 _SEVERITY_COLORS = {
     "critical": "#dc2626", "high": "#ea580c", "medium": "#d97706",
     "low": "#65a30d", "info": "#64748b",

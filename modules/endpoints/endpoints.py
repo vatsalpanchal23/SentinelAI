@@ -24,6 +24,17 @@ from uuid import uuid4
 
 import requests
 
+PLUGIN_METADATA = {
+    "name": "endpoints",
+    "description": "Endpoint, form, and surface discovery",
+    "version": "0.1.0",
+    "author": "SentinelAI",
+    "priority": 30,
+    "enabled": True,
+    "scan_type": "discovery",
+}
+
+
 TIMEOUT = 8
 USER_AGENT = "SentinelAI-Endpoints/0.1 (authorized-assessment)"
 MAX_LINKS = 50
