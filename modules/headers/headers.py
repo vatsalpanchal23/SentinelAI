@@ -11,6 +11,17 @@ import re
 
 import requests
 
+PLUGIN_METADATA = {
+    "name": "headers",
+    "description": "Security header and cookie analysis",
+    "version": "0.1.0",
+    "author": "SentinelAI",
+    "priority": 60,
+    "enabled": True,
+    "scan_type": "headers",
+}
+
+
 TIMEOUT = 8
 USER_AGENT = "SentinelAI-Headers/0.1 (authorized-assessment)"
 

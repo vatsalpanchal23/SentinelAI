@@ -14,6 +14,17 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
+PLUGIN_METADATA = {
+    "name": "javascript",
+    "description": "Client-side JavaScript analysis",
+    "version": "0.1.0",
+    "author": "SentinelAI",
+    "priority": 40,
+    "enabled": True,
+    "scan_type": "analysis",
+}
+
+
 TIMEOUT = 8
 USER_AGENT = "SentinelAI-JSAnalysis/0.1 (authorized-assessment)"
 MAX_JS_FILES = 15

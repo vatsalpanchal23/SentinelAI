@@ -28,6 +28,17 @@ import re
 import requests
 
 OSV_ENDPOINT = "https://api.osv.dev/v1/query"
+PLUGIN_METADATA = {
+    "name": "cve",
+    "description": "Known vulnerability intelligence matching",
+    "version": "0.1.0",
+    "author": "SentinelAI",
+    "priority": 50,
+    "enabled": True,
+    "scan_type": "intelligence",
+}
+
+
 TIMEOUT = 10
 
 _WERKZEUG_RE = re.compile(r"Werkzeug/(\d+\.\d+(?:\.\d+)?)", re.IGNORECASE)

@@ -27,6 +27,17 @@ from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
 
 import requests
 
+PLUGIN_METADATA = {
+    "name": "vulnerabilities",
+    "description": "Lightweight vulnerability checks",
+    "version": "0.1.0",
+    "author": "SentinelAI",
+    "priority": 70,
+    "enabled": True,
+    "scan_type": "vulnerability",
+}
+
+
 TIMEOUT = 8
 USER_AGENT = "SentinelAI-VulnCheck/0.1 (authorized-assessment)"
 MAX_PARAM_PROBES = 20

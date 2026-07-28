@@ -29,29 +29,9 @@ def create_app(config_class=Config):
     csrf.init_app(app)
     limiter.init_app(app)
 
-    from modules.recon import recon
-    worker.register_module("recon", recon.run)
-
-    from modules.headers import headers
-    worker.register_module("headers", headers.run)
-
-    from modules.fingerprint import fingerprint
-    worker.register_module("fingerprint", fingerprint.run)
-
-    from modules.endpoints import endpoints
-    worker.register_module("endpoints", endpoints.run)
-
-    from modules.javascript import javascript
-    worker.register_module("javascript", javascript.run)
-
-    from modules.vulnerabilities import vulnerabilities
-    worker.register_module("vulnerabilities", vulnerabilities.run)
-
-    from modules.cve import cve
-    worker.register_module("cve", cve.run)
-
-    from modules.active_scan import active_scan
-    worker.register_module("active_scan", active_scan.run)
+    # Discover scanner plugins during startup so import/metadata errors surface
+    # early while preserving a lightweight worker entry point.
+    worker.get_registry()
 
     from dashboard.routes import dashboard_bp
     app.register_blueprint(dashboard_bp)

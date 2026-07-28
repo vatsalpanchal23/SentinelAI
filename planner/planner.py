@@ -22,7 +22,13 @@ DEFAULT_PIPELINE = [
 
 def plan_assessment(assessment_id: int, active_scan_enabled: bool = False) -> list[str]:
     """Create ModuleRun rows for the assessment pipeline. Returns the module order."""
-    pipeline = [m for m in DEFAULT_PIPELINE if m != "active_scan" or active_scan_enabled]
+    try:
+        from engine.pipeline import build_pipeline
+
+        pipeline = build_pipeline(active_scan_enabled=active_scan_enabled)
+    except Exception:
+        # Preserve legacy behavior if registry discovery fails during startup/tests.
+        pipeline = [m for m in DEFAULT_PIPELINE if m != "active_scan" or active_scan_enabled]
     for module_name in pipeline:
         run = ModuleRun(assessment_id=assessment_id, name=module_name, status="pending")
         db.session.add(run)
