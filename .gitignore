@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.db
+.env
+evidence/*
+!evidence/.gitkeep
+reports/*
+!reports/.gitkeep

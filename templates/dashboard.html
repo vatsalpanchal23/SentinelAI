@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - SentinelAI{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">Assessments</h1>
+
+{% if assessments %}
+<div class="space-y-3">
+  {% for a in assessments %}
+  <a href="{{ url_for('dashboard.assessment_detail', assessment_id=a.id) }}"
+     class="block border border-slate-800 rounded-lg px-4 py-3 hover:border-emerald-500/50 transition">
+    <div class="flex items-center justify-between">
+      <span class="font-medium">{{ a.target_url }}</span>
+      <span class="text-xs uppercase tracking-wide px-2 py-0.5 rounded
+                   {% if a.status == 'completed' %}bg-emerald-500/20 text-emerald-400
+                   {% elif a.status == 'running' %}bg-amber-500/20 text-amber-400
+                   {% elif a.status == 'failed' %}bg-red-500/20 text-red-400
+                   {% else %}bg-slate-700 text-slate-300{% endif %}">
+        {{ a.status }}
+      </span>
+    </div>
+    <div class="text-xs text-slate-500 mt-1">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-slate-500 border border-dashed border-slate-800 rounded-lg px-6 py-10 text-center">
+  No assessments yet.
+  <a href="{{ url_for('dashboard.target') }}" class="text-emerald-400 hover:underline">Start one</a>.
+</div>
+{% endif %}
+{% endblock %}
