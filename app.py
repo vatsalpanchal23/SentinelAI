@@ -1,9 +1,11 @@
+import ipaddress
 import logging
-import os
+import secrets
 
 from flask import Flask
 
-from config.settings import Config
+import auth
+from config.settings import DEFAULT_DEV_SECRET_KEY, Config
 from database.models import db
 from extensions import csrf, limiter
 import worker
@@ -19,15 +21,22 @@ def create_app(config_class=Config):
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config.from_object(config_class)
 
-    if app.config["SECRET_KEY"] == "dev-secret-change-me":
+    if app.config["SECRET_KEY"] == DEFAULT_DEV_SECRET_KEY:
+        # A known SECRET_KEY lets anyone forge session cookies and CSRF
+        # tokens, so the shipped placeholder is never usable as a key. A
+        # per-process random key keeps local dev working (at the cost of
+        # invalidating sessions on restart) without a guessable secret.
+        app.config["SECRET_KEY"] = secrets.token_urlsafe(32)
         logger.warning(
-            "Using the default SECRET_KEY. Fine for local dev, but set SECRET_KEY in "
-            ".env before this ever runs anywhere reachable by anyone else."
+            "Refusing to use the default SECRET_KEY; generated an ephemeral one for "
+            "this process. Sessions and CSRF tokens will not survive a restart -- set "
+            "SECRET_KEY in .env."
         )
 
     db.init_app(app)
     csrf.init_app(app)
     limiter.init_app(app)
+    auth.init_app(app)
 
     # Discover scanner plugins during startup so import/metadata errors surface
     # early while preserving a lightweight worker entry point. The registry
@@ -66,10 +75,39 @@ def create_app(config_class=Config):
     return app
 
 
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host in ("localhost", "localhost.localdomain")
+
+
 if __name__ == "__main__":
     app = create_app()
-    debug_mode = os.environ.get("FLASK_DEBUG", "1") == "1"
-    port = int(os.environ.get("PORT", "5000"))
-    if not debug_mode:
-        logger.info("Starting with debug=False (FLASK_DEBUG=0) -- werkzeug's reloader is off.")
-    app.run(debug=debug_mode, host="0.0.0.0", port=port)
+    host = app.config["HOST"]
+    debug_mode = app.config["DEBUG"]
+
+    if not _is_loopback(host):
+        # Off-loopback the app is reachable by others, so the two things that
+        # only hold up behind loopback have to hold for real: no interactive
+        # debugger, and credentials on every route.
+        if debug_mode:
+            raise SystemExit(
+                f"Refusing to serve on {host} with FLASK_DEBUG enabled: Werkzeug's "
+                "debugger allows arbitrary code execution by anyone who can reach it."
+            )
+        if not auth.auth_configured(app.config):
+            raise SystemExit(
+                f"Refusing to serve on {host} without authentication: set "
+                "AUTH_PASSWORD_HASH (or AUTH_PASSWORD) so scan submission and "
+                "assessment results are not world-readable."
+            )
+
+    if not auth.auth_configured(app.config):
+        logger.warning(
+            "No AUTH_PASSWORD_HASH/AUTH_PASSWORD configured -- every route is open "
+            "to anyone who can reach %s.",
+            host,
+        )
+
+    app.run(debug=debug_mode, host=host, port=app.config["PORT"])

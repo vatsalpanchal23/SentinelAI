@@ -12,6 +12,13 @@ BASE_DIR = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 
+def _flag(key: str, default: bool) -> bool:
+    value = os.environ.get(key)
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
 def _env(key: str, default: str) -> str:
     """os.environ.get(key, default) treats an empty string as 'set', so a
     blank line in .env (e.g. DATABASE_URL=) silently wins over the default
@@ -20,8 +27,26 @@ def _env(key: str, default: str) -> str:
     return value if value and value.strip() else default
 
 
+DEFAULT_DEV_SECRET_KEY = "dev-secret-change-me"
+
+
 class Config:
-    SECRET_KEY = _env("SECRET_KEY", "dev-secret-change-me")
+    SECRET_KEY = _env("SECRET_KEY", DEFAULT_DEV_SECRET_KEY)
+
+    # Serving/auth posture. Debug is off and binding is loopback-only unless
+    # explicitly changed: Werkzeug's debugger exposes an interactive Python
+    # console to anyone who can reach it.
+    DEBUG = _flag("FLASK_DEBUG", False)
+    HOST = _env("HOST", "127.0.0.1")
+    PORT = int(_env("PORT", "5000"))
+
+    AUTH_USERNAME = _env("AUTH_USERNAME", "sentinel")
+    AUTH_PASSWORD_HASH = _env("AUTH_PASSWORD_HASH", "")
+    AUTH_PASSWORD = _env("AUTH_PASSWORD", "")
+
+    # Scanning a loopback/RFC1918 target is an opt-in: without it the app
+    # would happily fetch internal-only services on this host's behalf.
+    ALLOW_PRIVATE_TARGETS = _flag("ALLOW_PRIVATE_TARGETS", False)
 
     SQLALCHEMY_DATABASE_URI = _env(
         "DATABASE_URL", f"sqlite:///{os.path.join(BASE_DIR, 'database', 'sentinelai.db')}"
@@ -40,4 +65,4 @@ class Config:
 
     GEMINI_API_KEY = _env("GEMINI_API_KEY", "")
 
-    AI_ANALYSIS_ENABLED = _env("AI_ANALYSIS_ENABLED", "true").strip().lower() == "true"
+    AI_ANALYSIS_ENABLED = _flag("AI_ANALYSIS_ENABLED", True)

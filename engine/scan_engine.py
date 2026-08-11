@@ -74,7 +74,7 @@ class ScanEngine:
                         logger.info("assessment %s: module '%s' completed, %d finding(s) recorded", assessment_id, run_row.name, findings_added)
                         for message in module_errors:
                             logger.warning("assessment %s: module '%s' reported an error: %s", assessment_id, run_row.name, message)
-            except Exception:
+            except Exception as exc:
                 # The module may have added Finding rows before it blew up, and
                 # a failure raised by commit() itself leaves the session
                 # unusable -- roll back so partial writes aren't persisted and
@@ -83,7 +83,10 @@ class ScanEngine:
                 db.session.rollback()
                 run_row = self._reload_run_row(ModuleRun, run_row)
                 run_row.status = "failed"
-                run_row.raw_output = failure
+                # Full traceback goes to the server log only; raw_output is
+                # surfaced in the UI/status API, and a traceback there leaks
+                # filesystem paths and internals.
+                run_row.raw_output = f"{type(exc).__name__}: {exc}"
                 any_failed = True
                 logger.error("assessment %s: module '%s' failed\n%s", assessment_id, run_row.name, failure)
 

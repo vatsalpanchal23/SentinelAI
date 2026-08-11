@@ -11,6 +11,7 @@ from database.models import db, Assessment
 from planner.planner import plan_assessment
 from extensions import limiter
 from scoring import compute_risk, SEVERITIES
+from targets import target_address_error
 import worker
 
 dashboard_bp = Blueprint(
@@ -22,8 +23,9 @@ logger = logging.getLogger("sentinelai.dashboard")
 _DUPLICATE_WINDOW_MINUTES = 5
 
 
-def _validate_target_url(raw: str) -> str | None:
-    """Returns an error message if the URL is unusable, else None."""
+def _validate_target_url(raw: str, allow_private: bool = False) -> str | None:
+    """Returns an error message if the URL is unusable or not an allowed scan
+    target, else None."""
     if not raw:
         return "Target URL is required."
     parsed = urlparse(raw)
@@ -31,7 +33,7 @@ def _validate_target_url(raw: str) -> str | None:
         return "Target URL must start with http:// or https://."
     if not parsed.netloc:
         return "Target URL must include a host (e.g. http://localhost:3000)."
-    return None
+    return target_address_error(raw, allow_private=allow_private)
 
 
 @dashboard_bp.route("/")
@@ -48,7 +50,10 @@ def target():
         authorized = request.form.get("authorized") == "1"
         active_scan_enabled = request.form.get("active_scan_enabled") == "1"
 
-        error = _validate_target_url(target_url)
+        error = _validate_target_url(
+            target_url,
+            allow_private=current_app.config.get("ALLOW_PRIVATE_TARGETS", False),
+        )
         if not error and not authorized:
             error = "You must confirm you own or are authorized to test this target before it can run."
         if error:
@@ -122,9 +127,16 @@ def assessment_detail(assessment_id):
 @dashboard_bp.route("/assessment/<int:assessment_id>/report")
 def assessment_report(assessment_id):
     assessment = Assessment.query.get_or_404(assessment_id)
-    if not assessment.report_path or not os.path.exists(assessment.report_path):
+    if not assessment.report_path:
         return "Report not generated yet -- it's produced once the assessment finishes.", 404
-    return send_file(assessment.report_path, mimetype="text/html")
+
+    # Only ever serve out of REPORTS_DIR, so a report_path that somehow ends up
+    # pointing elsewhere can't turn this route into arbitrary file read.
+    reports_dir = os.path.realpath(current_app.config["REPORTS_DIR"])
+    path = os.path.realpath(assessment.report_path)
+    if os.path.commonpath([reports_dir, path]) != reports_dir or not os.path.isfile(path):
+        return "Report not generated yet -- it's produced once the assessment finishes.", 404
+    return send_file(path, mimetype="text/html")
 
 
 def _serialize_status(assessment: Assessment) -> dict:
