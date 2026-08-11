@@ -28,9 +28,9 @@ def create_app(config_class=Config):
         # invalidating sessions on restart) without a guessable secret.
         app.config["SECRET_KEY"] = secrets.token_urlsafe(32)
         logger.warning(
-            "SECRET_KEY is unset; generated an ephemeral one for this process. "
-            "Sessions and CSRF tokens will not survive a restart -- set SECRET_KEY "
-            "in .env."
+            "Refusing to use the default SECRET_KEY; generated an ephemeral one for "
+            "this process. Sessions and CSRF tokens will not survive a restart -- set "
+            "SECRET_KEY in .env."
         )
 
     db.init_app(app)

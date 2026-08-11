@@ -12,6 +12,12 @@ Loopback/private targets are legitimate for local testing, so they are
 allowed via ALLOW_PRIVATE_TARGETS=true. Link-local (including the
 169.254.169.254 cloud metadata address), multicast, and reserved space
 are never allowed -- there is no assessment use case for them.
+
+A hostname that doesn't resolve is not treated as a policy violation: it
+reaches nothing, so there is nothing to protect against, and the modules
+will report the failure themselves. Note that this check runs at
+submission time, so it does not close the DNS-rebinding window between
+validation here and the requests the modules make later.
 """
 
 import ipaddress
@@ -53,9 +59,9 @@ def target_address_error(raw_url: str, allow_private: bool) -> str | None:
     try:
         addresses = _addresses_for(hostname)
     except socket.gaierror:
-        return f"Target hostname '{hostname}' could not be resolved."
+        return None
     if not addresses:
-        return f"Target hostname '{hostname}' could not be resolved."
+        return None
 
     if any(_always_blocked(address) for address in addresses):
         return (

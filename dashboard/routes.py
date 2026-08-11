@@ -23,8 +23,9 @@ logger = logging.getLogger("sentinelai.dashboard")
 _DUPLICATE_WINDOW_MINUTES = 5
 
 
-def _validate_target_url(raw: str) -> str | None:
-    """Returns an error message if the URL is unusable, else None."""
+def _validate_target_url(raw: str, allow_private: bool = False) -> str | None:
+    """Returns an error message if the URL is unusable or not an allowed scan
+    target, else None."""
     if not raw:
         return "Target URL is required."
     parsed = urlparse(raw)
@@ -32,9 +33,7 @@ def _validate_target_url(raw: str) -> str | None:
         return "Target URL must start with http:// or https://."
     if not parsed.netloc:
         return "Target URL must include a host (e.g. http://localhost:3000)."
-    return target_address_error(
-        raw, allow_private=current_app.config.get("ALLOW_PRIVATE_TARGETS", False)
-    )
+    return target_address_error(raw, allow_private=allow_private)
 
 
 @dashboard_bp.route("/")
@@ -51,7 +50,10 @@ def target():
         authorized = request.form.get("authorized") == "1"
         active_scan_enabled = request.form.get("active_scan_enabled") == "1"
 
-        error = _validate_target_url(target_url)
+        error = _validate_target_url(
+            target_url,
+            allow_private=current_app.config.get("ALLOW_PRIVATE_TARGETS", False),
+        )
         if not error and not authorized:
             error = "You must confirm you own or are authorized to test this target before it can run."
         if error:

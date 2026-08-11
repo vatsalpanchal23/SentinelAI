@@ -3,6 +3,7 @@ confirmation, detail + report views, and the status/SSE APIs."""
 
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -151,14 +152,23 @@ def test_missing_assessment_detail_is_a_404(client):
     assert client.get("/assessment/999").status_code == 404
 
 
-def test_report_view_is_404_until_the_report_exists(client, assessment, tmp_path):
+def test_report_view_is_404_until_the_report_exists(client, app, assessment, tmp_path):
+    reports_dir = Path(app.config["REPORTS_DIR"])
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
     assert client.get(f"/assessment/{assessment.id}/report").status_code == 404
 
-    assessment.report_path = str(tmp_path / "gone.html")
+    assessment.report_path = str(reports_dir / "gone.html")
     db.session.commit()
     assert client.get(f"/assessment/{assessment.id}/report").status_code == 404, "stale path"
 
-    report = tmp_path / "report.html"
+    outside = tmp_path / "outside.html"
+    outside.write_text("<html>outside</html>")
+    assessment.report_path = str(outside)
+    db.session.commit()
+    assert client.get(f"/assessment/{assessment.id}/report").status_code == 404, "outside REPORTS_DIR"
+
+    report = reports_dir / "report.html"
     report.write_text("<html>report</html>")
     assessment.report_path = str(report)
     db.session.commit()
