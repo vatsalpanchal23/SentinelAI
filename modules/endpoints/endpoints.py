@@ -171,6 +171,24 @@ _KNOWN_OAUTH_HOSTS = {
 }
 
 
+MAX_RECORDED_ERRORS = 25
+
+
+def _record_error(result: dict, message: str) -> None:
+    """Record a non-fatal probe failure. Bounded, because a target that goes
+    down mid-scan would otherwise produce one error per probed path."""
+    if len(result["errors"]) < MAX_RECORDED_ERRORS:
+        result["errors"].append(message)
+    else:
+        result["errors_suppressed"] = result.get("errors_suppressed", 0) + 1
+
+
+def _flush_suppressed_errors(result: dict) -> None:
+    suppressed = result.pop("errors_suppressed", 0)
+    if suppressed:
+        result["errors"].append(f"... and {suppressed} further probe error(s) not listed")
+
+
 def run(target_url: str, context: dict | None = None) -> dict:
     result = {
         "module": "endpoints",
@@ -213,14 +231,16 @@ def run(target_url: str, context: dict | None = None) -> dict:
     for link in list(same_origin)[:MAX_CRAWL_PAGES]:
         try:
             r = requests.get(link, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True)
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            _record_error(result, f"GET {link} failed during crawl: {exc}")
             continue
         if "text/html" not in r.headers.get("Content-Type", ""):
             continue
         p = _LinkFormParser(r.url)
         try:
             p.feed(r.text or "")
-        except Exception:
+        except Exception as exc:
+            _record_error(result, f"HTML parse error on {r.url}: {exc}")
             continue
         all_links |= {l for l in p.links if urlparse(l).netloc in ("", base_netloc)}
         all_forms.extend(p.forms)
@@ -228,14 +248,15 @@ def run(target_url: str, context: dict | None = None) -> dict:
             directory_listing = True
 
     # guess common app paths not already discovered, using the same soft-404 baseline filter
-    baseline_hash = _get_baseline_hash(target_url)
+    baseline_hash = _get_baseline_hash(target_url, result)
     for path in COMMON_PATHS:
         url = urljoin(target_url, path)
         if url in all_links:
             continue
         try:
             r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=False)
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            _record_error(result, f"GET {url} failed: {exc}")
             continue
         if r.status_code == 200 and r.content:
             content_hash = hashlib.md5(r.content).hexdigest()
@@ -267,7 +288,8 @@ def run(target_url: str, context: dict | None = None) -> dict:
             r = requests.get(
                 url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=False
             )
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            _record_error(result, f"GET {url} failed: {exc}")
             continue
         if r.status_code != 200 or not r.content:
             continue
@@ -280,7 +302,8 @@ def run(target_url: str, context: dict | None = None) -> dict:
         url = urljoin(target_url, path)
         try:
             r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=False)
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            _record_error(result, f"GET {url} failed: {exc}")
             continue
         if r.status_code != 200 or not r.content:
             continue
@@ -289,16 +312,20 @@ def run(target_url: str, context: dict | None = None) -> dict:
             continue
         result["api_surfaces_found"].append(path)
 
+    _flush_suppressed_errors(result)
     return result
 
 
-def _get_baseline_hash(target_url: str):
+def _get_baseline_hash(target_url: str, result: dict):
     """GET a near-certainly-nonexistent path so real finds can be told apart from soft-404 catch-alls."""
     probe_path = f"__sentinelai_nonexistent_check_{uuid4().hex}__"
     url = urljoin(target_url, probe_path)
     try:
         r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=False)
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        # Without a baseline every soft-404 catch-all page looks like a real
+        # find, so note that the results are less trustworthy.
+        _record_error(result, f"soft-404 baseline probe failed ({exc}); path results may include false positives")
         return None
     if r.status_code == 200 and r.content:
         return hashlib.md5(r.content).hexdigest()

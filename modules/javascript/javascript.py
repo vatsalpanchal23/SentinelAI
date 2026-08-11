@@ -139,8 +139,8 @@ def run(target_url: str, context: dict | None = None) -> dict:
                 map_resp = requests.head(map_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
                 if map_resp.status_code == 200:
                     result["exposed_source_maps"].append(map_url)
-            except requests.RequestException:
-                pass
+            except requests.RequestException as exc:
+                result["errors"].append(f"source-map check for {map_url} failed: {exc}")
 
     for source, text in bodies.items():
         for label, pattern, severity in SECRET_PATTERNS:

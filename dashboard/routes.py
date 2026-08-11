@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta
@@ -15,6 +16,8 @@ import worker
 dashboard_bp = Blueprint(
     "dashboard", __name__, template_folder="templates"
 )
+
+logger = logging.getLogger("sentinelai.dashboard")
 
 _DUPLICATE_WINDOW_MINUTES = 5
 
@@ -78,8 +81,22 @@ def target():
         db.session.add(assessment)
         db.session.commit()
 
-        plan_assessment(assessment.id, active_scan_enabled=active_scan_enabled)
-        worker.submit_assessment_job(current_app._get_current_object(), assessment.id)
+        try:
+            plan_assessment(assessment.id, active_scan_enabled=active_scan_enabled)
+            worker.submit_assessment_job(current_app._get_current_object(), assessment.id)
+        except Exception:
+            # Without this the row stays "pending" forever and the submitter
+            # only sees a generic 500 with no idea the scan never started.
+            logger.exception("assessment %s: could not be queued", assessment.id)
+            db.session.rollback()
+            assessment.status = "failed"
+            db.session.commit()
+            return render_template(
+                "target.html",
+                error="The assessment could not be queued -- see the server log for details.",
+                target_url=target_url, authorized=authorized,
+                active_scan_enabled=active_scan_enabled,
+            ), 500
 
         return redirect(url_for("dashboard.assessment_detail", assessment_id=assessment.id))
 
@@ -130,6 +147,7 @@ def _serialize_status(assessment: Assessment) -> dict:
                 "status": m.status,
                 "duration_seconds": _duration(m),
                 "failure_reason": (m.raw_output or "").splitlines()[-1] if m.status == "failed" else None,
+                "errors": (m.errors or "").splitlines(),
             }
             for m in assessment.modules
         ],
@@ -170,15 +188,23 @@ def assessment_stream(assessment_id):
         # Bound the connection so a stuck browser tab doesn't hold a worker
         # thread open forever; EventSource reconnects transparently on close.
         for _ in range(300):  # ~10 minutes at 2s ticks
-            with app_obj.app_context():
-                assessment = Assessment.query.get(assessment_id)
-                if assessment is None:
-                    yield 'event: error\ndata: {"error": "not found"}\n\n'
-                    return
-                payload = _serialize_status(assessment)
-                finished = assessment.status in ("completed", "failed")
+            try:
+                with app_obj.app_context():
+                    assessment = Assessment.query.get(assessment_id)
+                    if assessment is None:
+                        yield 'event: error\ndata: {"error": "not found"}\n\n'
+                        return
+                    payload = _serialize_status(assessment)
+                    finished = assessment.status in ("completed", "failed")
+                encoded = json.dumps(payload)
+            except Exception:
+                # An exception inside a streaming generator is invisible: Flask
+                # has already sent 200 OK, so the client just sees the stream
+                # go quiet. Log it and tell the browser explicitly.
+                logger.exception("assessment %s: status stream failed", assessment_id)
+                yield 'event: error\ndata: {"error": "status stream failed"}\n\n'
+                return
 
-            encoded = json.dumps(payload)
             if encoded != last_payload:
                 yield f"data: {encoded}\n\n"
                 last_payload = encoded

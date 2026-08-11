@@ -53,8 +53,19 @@ def generate(assessment_id: int) -> str:
     filename = f"assessment_{assessment_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.html"
     path = os.path.join(Config.REPORTS_DIR, filename)
 
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(_render(assessment, counts, risk_score, findings_by_severity, ai_summary))
+    # Render first, then write, then rename: a failure while rendering or
+    # writing must not leave a truncated report behind that the dashboard would
+    # happily serve as if it were complete.
+    rendered = _render(assessment, counts, risk_score, findings_by_severity, ai_summary)
+    tmp_path = f"{path}.partial"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            fh.write(rendered)
+        os.replace(tmp_path, path)
+    except OSError:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
     return path
 

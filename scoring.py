@@ -9,6 +9,10 @@ critical does) -- a CVSS/OWASP-Risk-Rating-based model would be more
 defensible. Tracked as a future improvement, not done here.
 """
 
+import logging
+
+logger = logging.getLogger("sentinelai.scoring")
+
 SEVERITY_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 0}
 SEVERITIES = ["critical", "high", "medium", "low", "info"]
 
@@ -19,6 +23,10 @@ def compute_risk(findings) -> tuple[dict, int]:
     counts = {sev: 0 for sev in SEVERITIES}
     for f in findings:
         severity = f.severity if hasattr(f, "severity") else f["severity"]
+        if severity not in counts:
+            # An unrecognized severity contributes nothing to the score below,
+            # so a typo'd severity would quietly make a finding weightless.
+            logger.warning("finding has unrecognized severity %r; it will not affect the risk score", severity)
         counts[severity] = counts.get(severity, 0) + 1
     raw_score = sum(counts[sev] * weight for sev, weight in SEVERITY_WEIGHTS.items())
     risk_score = max(0, 100 - raw_score)

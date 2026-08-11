@@ -60,7 +60,7 @@ def run(target_url: str, context: dict | None = None) -> dict:
 
     if shutil.which("nuclei"):
         try:
-            result["nuclei_findings"] = _run_nuclei(target_url)
+            result["nuclei_findings"] = _run_nuclei(target_url, result)
         except subprocess.TimeoutExpired:
             result["errors"].append(f"nuclei timed out after {NUCLEI_TIMEOUT_SECONDS}s")
         except Exception as exc:  # noqa: BLE001 - keep the other tool running even if this one breaks
@@ -70,7 +70,7 @@ def run(target_url: str, context: dict | None = None) -> dict:
 
     if shutil.which("sqlmap"):
         try:
-            result["sqlmap_findings"] = _run_sqlmap(target_url)
+            result["sqlmap_findings"] = _run_sqlmap(target_url, result)
         except subprocess.TimeoutExpired:
             result["errors"].append(f"sqlmap timed out after {SQLMAP_TIMEOUT_SECONDS}s")
         except Exception as exc:  # noqa: BLE001
@@ -81,7 +81,18 @@ def run(target_url: str, context: dict | None = None) -> dict:
     return result
 
 
-def _run_nuclei(target_url: str) -> list:
+def _record_tool_failure(result: dict, tool: str, proc) -> None:
+    """A non-zero exit (bad flags, template load failure, unreachable target)
+    leaves stdout empty, which parses into zero findings and reads exactly like
+    a clean result. Surface it instead."""
+    if proc.returncode == 0:
+        return
+    detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    tail = detail[-1] if detail else "no output"
+    result["errors"].append(f"{tool} exited with code {proc.returncode}: {tail}")
+
+
+def _run_nuclei(target_url: str, result: dict) -> list:
     cmd = [
         "nuclei", "-u", target_url,
         "-jsonl",
@@ -90,8 +101,10 @@ def _run_nuclei(target_url: str) -> list:
         "-timeout", "10",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=NUCLEI_TIMEOUT_SECONDS)
+    _record_tool_failure(result, "nuclei", proc)
 
     findings = []
+    unparsable = 0
     for line in (proc.stdout or "").splitlines():
         line = line.strip()
         if not line:
@@ -99,6 +112,7 @@ def _run_nuclei(target_url: str) -> list:
         try:
             entry = json.loads(line)
         except json.JSONDecodeError:
+            unparsable += 1
             continue
         info = entry.get("info", {})
         findings.append(
@@ -110,6 +124,8 @@ def _run_nuclei(target_url: str) -> list:
                 "description": info.get("description"),
             }
         )
+    if unparsable:
+        result["errors"].append(f"nuclei: {unparsable} output line(s) were not valid JSON and were ignored")
     return findings
 
 
@@ -117,7 +133,7 @@ _SQLMAP_PARAM_RE = re.compile(r"Parameter:\s*(\S+)\s*\(([^)]+)\)")
 _SQLMAP_TYPE_RE = re.compile(r"Type:\s*(.+)")
 
 
-def _run_sqlmap(target_url: str) -> list:
+def _run_sqlmap(target_url: str, result: dict) -> list:
     """sqlmap's machine-readable output requires a session/output-dir setup;
     v1 parses the human-readable stdout it prints in --batch mode instead.
     This is inherently more brittle than JSON parsing -- if sqlmap changes
@@ -132,6 +148,7 @@ def _run_sqlmap(target_url: str) -> list:
         "--batch-timeout=" + str(SQLMAP_TIMEOUT_SECONDS),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=SQLMAP_TIMEOUT_SECONDS)
+    _record_tool_failure(result, "sqlmap", proc)
     output = proc.stdout or ""
 
     findings = []
