@@ -122,7 +122,7 @@ def run(target_url: str, context: dict | None = None) -> dict:
         # source map exposure: <file>.js.map reachable?
         if js_url.endswith(".js"):
             map_url = js_url + ".map"
-            map_resp = client.head(map_url, record_error=False)
+            map_resp = client.head(map_url, error_label=f"source-map check for {map_url}")
             if map_resp is not None and map_resp.status_code == 200:
                 result["exposed_source_maps"].append(map_url)
 

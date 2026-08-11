@@ -167,6 +167,30 @@ _KNOWN_OAUTH_HOSTS = {
 }
 
 
+MAX_RECORDED_ERRORS = 25
+
+
+class _BoundedErrors(list):
+    """Error sink keeping the first MAX_RECORDED_ERRORS messages and counting the
+    rest, so a target that goes down mid-scan can't record one error per probed
+    path."""
+
+    def __init__(self):
+        super().__init__()
+        self.suppressed = 0
+
+    def append(self, message) -> None:
+        if len(self) < MAX_RECORDED_ERRORS:
+            super().append(message)
+        else:
+            self.suppressed += 1
+
+    def flush_suppressed(self) -> None:
+        if self.suppressed:
+            super().append(f"... and {self.suppressed} further probe error(s) not listed")
+            self.suppressed = 0
+
+
 def run(target_url: str, context: dict | None = None) -> dict:
     result = module_result(
         "endpoints", target_url,
@@ -177,6 +201,7 @@ def run(target_url: str, context: dict | None = None) -> dict:
         sensitive_paths_found=[],
         directory_listing=False,
     )
+    result["errors"] = _BoundedErrors()
     client = HttpClient(AGENT_SUFFIX, result["errors"])
 
     resp = client.get(target_url)
@@ -199,11 +224,11 @@ def run(target_url: str, context: dict | None = None) -> dict:
 
     # one hop deeper: follow a bounded number of discovered same-origin pages
     for link in list(homepage_links)[:MAX_CRAWL_PAGES]:
-        r = client.get(link, record_error=False)
+        r = client.get(link, error_label=f"GET {link} during crawl")
         if r is None or "text/html" not in r.headers.get("Content-Type", ""):
             continue
         p = _LinkFormParser(r.url)
-        if not feed_html(p, r.text):
+        if not feed_html(p, r.text, result["errors"], f"HTML parse error on {r.url}"):
             continue
         all_links |= set(same_origin(p.links, base_netloc))
         all_forms.extend(p.forms)
@@ -241,16 +266,17 @@ def run(target_url: str, context: dict | None = None) -> dict:
     for path, _resp in _probe_paths(client, target_url, API_DISCOVERY_PATHS, baseline_hash):
         result["api_surfaces_found"].append(path)
 
+    result["errors"].flush_suppressed()
     return result
 
 
 def _probe_paths(client: HttpClient, target_url: str, paths: list, baseline_hash: str | None):
     """Yield (path, response) for each path that serves real content: a 200 with
-    a body that differs from the soft-404 baseline. Transport errors are skipped
-    silently -- an unreachable guessed path is the expected case, not an error
-    worth reporting."""
+    a body that differs from the soft-404 baseline. Transport failures are
+    recorded on the client's error sink rather than dropped, so a scan that found
+    nothing because the target stopped answering doesn't look like a clean one."""
     for path in paths:
-        r = client.get(urljoin(target_url, path), allow_redirects=False, record_error=False)
+        r = client.get(urljoin(target_url, path), allow_redirects=False)
         if r is None or r.status_code != 200 or not r.content:
             continue
         if baseline_hash is not None and content_hash(r.content) == baseline_hash:
@@ -262,6 +288,11 @@ def _get_baseline_hash(target_url: str, client: HttpClient) -> str | None:
     """GET a near-certainly-nonexistent path so real finds can be told apart from soft-404 catch-alls."""
     probe_path = f"__sentinelai_nonexistent_check_{uuid4().hex}__"
     r = client.get(urljoin(target_url, probe_path), allow_redirects=False, record_error=False)
-    if r is not None and r.status_code == 200 and r.content:
+    if r is None:
+        # Without a baseline every soft-404 catch-all page looks like a real
+        # find, so note that the results are less trustworthy.
+        client.record_error("soft-404 baseline probe failed; path results may include false positives")
+        return None
+    if r.status_code == 200 and r.content:
         return content_hash(r.content)
     return None

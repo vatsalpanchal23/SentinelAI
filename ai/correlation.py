@@ -17,9 +17,13 @@ the configured provider is unreachable -- this must never block a report
 from being generated.
 """
 
+import logging
+
 from flask import current_app
 
 from ai.client import ask
+
+logger = logging.getLogger("sentinelai.ai.correlation")
 
 _SYSTEM_PROMPT = (
     "You are a senior penetration tester writing the analysis section of a "
@@ -46,6 +50,12 @@ def analyze(assessment) -> str | None:
     try:
         return ask(prompt, system=_SYSTEM_PROMPT)
     except Exception:  # noqa: BLE001 - AI analysis is a bonus section, never fatal to the report
+        # Non-fatal, but log it: an unreachable/misconfigured provider is
+        # otherwise indistinguishable from AI analysis being turned off.
+        logger.warning(
+            "AI analysis unavailable for assessment %s; report will omit the AI section",
+            assessment.id, exc_info=True,
+        )
         return None
 
 

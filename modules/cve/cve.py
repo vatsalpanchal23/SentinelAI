@@ -55,7 +55,9 @@ def run(target_url: str, context: dict | None = None) -> dict:
     for name, ecosystem, version, source in packages:
         try:
             vulns = _query_osv(name, ecosystem, version)
-        except requests.RequestException as exc:
+        except (requests.RequestException, ValueError) as exc:
+            # ValueError covers a 200 response whose body isn't JSON, which
+            # older requests versions raise as a plain JSONDecodeError.
             result["errors"].append(f"OSV lookup failed for {name}@{version}: {exc}")
             continue
         for v in vulns:

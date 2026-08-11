@@ -121,8 +121,11 @@ def _check_tls(hostname: str, port: int, result: dict) -> dict:
         try:
             expiry = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
             days_remaining = (expiry - datetime.utcnow()).days
-        except ValueError:
-            pass
+        except ValueError as exc:
+            # days_remaining stays None, which silently disables the
+            # expired/expiring-soon findings -- say so rather than reporting a
+            # certificate as fine when we simply couldn't read its expiry.
+            result["errors"].append(f"could not parse certificate expiry '{not_after}': {exc}")
 
     issuer = dict(x[0] for x in cert.get("issuer", []))
     return {

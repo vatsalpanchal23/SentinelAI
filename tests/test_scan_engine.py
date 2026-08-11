@@ -9,8 +9,9 @@ from engine.scheduler import ScanScheduler
 
 
 class StubRegistry:
-    def __init__(self, plugins: dict):
+    def __init__(self, plugins: dict, errors: list | None = None):
         self._plugins = plugins
+        self.errors = errors or []
 
     def get(self, name):
         return self._plugins.get(name)

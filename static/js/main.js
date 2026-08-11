@@ -31,6 +31,28 @@ function renderSeverityCounts(data) {
   });
 }
 
+// A module can finish "completed" while still having failed to reach parts of
+// the target (timeouts, unparsable HTML, a missing external tool). Those used
+// to be visible only in the server log, which made a partial scan look like a
+// clean one.
+function renderModuleErrors(m, statusEl) {
+  const errors = m.errors ?? [];
+  let el = document.querySelector(`[data-module-errors="${m.name}"]`);
+  if (!errors.length) {
+    if (el) el.remove();
+    return;
+  }
+  if (!el) {
+    const row = statusEl?.closest("div.flex")?.parentElement;
+    if (!row) return;
+    el = document.createElement("div");
+    el.className = "px-4 pb-2 text-xs text-amber-400/90 whitespace-pre-line";
+    el.setAttribute("data-module-errors", m.name);
+    row.insertBefore(el, statusEl.closest("div.flex").nextSibling);
+  }
+  el.textContent = errors.join("\n");
+}
+
 function renderModules(data) {
   data.modules.forEach((m) => {
     const el = document.querySelector(`[data-module-status="${m.name}"]`);
@@ -40,6 +62,8 @@ function renderModules(data) {
     }
     const durEl = document.querySelector(`[data-module-duration="${m.name}"]`);
     if (durEl) durEl.textContent = formatDuration(m.duration_seconds);
+
+    renderModuleErrors(m, el);
 
     const reasonEl = document.querySelector(`[data-module-failure="${m.name}"]`);
     if (m.status === "failed") {
@@ -152,10 +176,24 @@ function connectAssessmentStream(assessmentId) {
     }
   };
 
-  source.onerror = () => {
-    // EventSource reconnects on its own; just let the user know things are
-    // momentarily stale instead of the page silently going quiet.
+  source.onerror = (evt) => {
     if (warningEl) warningEl.style.display = "block";
+    // The server also sends `event: error` when it can't serve the stream at
+    // all (assessment gone, DB error). Those arrive here with a payload, and
+    // unlike a dropped connection they won't fix themselves on reconnect.
+    if (evt?.data) {
+      source.close();
+      if (warningEl) {
+        try {
+          warningEl.textContent = `Live updates stopped: ${JSON.parse(evt.data).error}. Reload to retry.`;
+        } catch (e) {
+          warningEl.textContent = "Live updates stopped. Reload to retry.";
+        }
+      }
+      return;
+    }
+    // Otherwise EventSource reconnects on its own; just let the user know
+    // things are momentarily stale instead of the page silently going quiet.
   };
 }
 
