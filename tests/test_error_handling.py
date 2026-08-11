@@ -213,24 +213,24 @@ def test_queueing_failure_is_reported_to_the_submitter(app, monkeypatch):
 def test_endpoints_records_probe_failures_and_caps_them():
     from modules.endpoints import endpoints
 
-    result = {"errors": []}
+    errors = endpoints._BoundedErrors()
     for i in range(endpoints.MAX_RECORDED_ERRORS + 5):
-        endpoints._record_error(result, f"GET /{i} failed")
-    endpoints._flush_suppressed_errors(result)
+        errors.append(f"GET /{i} failed")
+    errors.flush_suppressed()
 
-    assert len(result["errors"]) == endpoints.MAX_RECORDED_ERRORS + 1
-    assert result["errors"][-1] == "... and 5 further probe error(s) not listed"
-    assert "errors_suppressed" not in result
+    assert len(errors) == endpoints.MAX_RECORDED_ERRORS + 1
+    assert errors[-1] == "... and 5 further probe error(s) not listed"
 
 
-def test_active_scan_reports_non_zero_tool_exit():
+def test_active_scan_reports_non_zero_tool_exit(monkeypatch):
     from modules.active_scan import active_scan
 
-    result = {"errors": []}
     proc = subprocess.CompletedProcess(args=["nuclei"], returncode=2, stdout="", stderr="could not load templates")
-    active_scan._record_tool_failure(result, "nuclei", proc)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: proc)
+    errors = []
 
-    assert result["errors"] == ["nuclei exited with code 2: could not load templates"]
+    assert active_scan._run_tool(["nuclei", "-u", "http://example.test"], 1, errors) == ""
+    assert errors == ["nuclei exited with code 2: could not load templates"]
 
 
 def test_report_write_failure_leaves_no_partial_file(app, monkeypatch, tmp_path):
