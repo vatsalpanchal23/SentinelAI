@@ -13,7 +13,8 @@ has at least one strong match, or several weak ones together.
 
 import re
 
-import requests
+from common.http import HttpClient, cookie_dict
+from common.results import module_result
 
 PLUGIN_METADATA = {
     "name": "fingerprint",
@@ -26,8 +27,7 @@ PLUGIN_METADATA = {
 }
 
 
-TIMEOUT = 8
-USER_AGENT = "SentinelAI-Fingerprint/0.1 (authorized-assessment)"
+AGENT_SUFFIX = "Fingerprint"
 
 # (technology, category) -> list of (source, pattern, confidence) checks.
 # source: "header:<Name>" | "cookie" | "body" | "cookie_value_pattern"
@@ -119,27 +119,14 @@ _FLASK_SESSION_VALUE_RE = re.compile(r"^[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-
 
 
 def run(target_url: str, context: dict | None = None) -> dict:
-    result = {
-        "module": "fingerprint",
-        "target": target_url,
-        "technologies": [],
-        "errors": [],
-    }
+    result = module_result("fingerprint", target_url, technologies=[])
 
-    try:
-        resp = requests.get(
-            target_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True
-        )
-    except requests.RequestException as exc:
-        result["errors"].append(f"GET {target_url} failed: {exc}")
+    resp = HttpClient(AGENT_SUFFIX, result["errors"]).get(target_url)
+    if resp is None:
         return result
 
     body = resp.text or ""
-    cookies = {}  # name -> value
-    for raw in re.split(r",(?=\s*\w+=)", resp.headers.get("Set-Cookie", "")):
-        if "=" in raw:
-            name, _, rest = raw.strip().partition("=")
-            cookies[name] = rest.split(";", 1)[0]
+    cookies = cookie_dict(resp)
 
     detected = []
     for name, category, checks in SIGNATURES:

@@ -9,7 +9,8 @@ HSTS header with a tiny max-age or missing includeSubDomains is weak.
 
 import re
 
-import requests
+from common.http import HttpClient, set_cookie_headers
+from common.results import module_result
 
 PLUGIN_METADATA = {
     "name": "headers",
@@ -22,8 +23,7 @@ PLUGIN_METADATA = {
 }
 
 
-TIMEOUT = 8
-USER_AGENT = "SentinelAI-Headers/0.1 (authorized-assessment)"
+AGENT_SUFFIX = "Headers"
 
 CHECKED_HEADERS = [
     "Content-Security-Policy",
@@ -40,22 +40,16 @@ _HSTS_MIN_MAX_AGE = 15552000  # 180 days -- a commonly cited minimum for a meani
 
 
 def run(target_url: str, context: dict | None = None) -> dict:
-    result = {
-        "module": "headers",
-        "target": target_url,
-        "missing": [],
-        "present": {},
-        "csp_issues": [],
-        "hsts_issues": [],
-        "errors": [],
-    }
+    result = module_result(
+        "headers", target_url,
+        missing=[],
+        present={},
+        csp_issues=[],
+        hsts_issues=[],
+    )
 
-    try:
-        resp = requests.get(
-            target_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True
-        )
-    except requests.RequestException as exc:
-        result["errors"].append(f"GET {target_url} failed: {exc}")
+    resp = HttpClient(AGENT_SUFFIX, result["errors"]).get(target_url)
+    if resp is None:
         return result
 
     response_headers = resp.headers
@@ -114,14 +108,8 @@ def _check_hsts(hsts: str) -> list:
 
 def _check_cookies(resp) -> list:
     """Flag any Set-Cookie missing HttpOnly / Secure / SameSite."""
-    try:
-        raw_cookies = resp.raw.headers.getlist("Set-Cookie")
-    except AttributeError:
-        single = resp.headers.get("Set-Cookie")
-        raw_cookies = [single] if single else []
-
     issues = []
-    for cookie_str in raw_cookies:
+    for cookie_str in set_cookie_headers(resp):
         name = cookie_str.split("=", 1)[0].strip()
         lower = cookie_str.lower()
         missing = [

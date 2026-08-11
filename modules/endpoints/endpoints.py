@@ -16,13 +16,13 @@ Everything here is a GET request or static HTML analysis -- nothing
 submits data or attempts to trigger lockouts/rate limits.
 """
 
-import hashlib
 import re
-from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
 
-import requests
+from common.html import LinkParser, feed_html, same_origin
+from common.http import HttpClient, content_hash
+from common.results import module_result
 
 PLUGIN_METADATA = {
     "name": "endpoints",
@@ -35,8 +35,7 @@ PLUGIN_METADATA = {
 }
 
 
-TIMEOUT = 8
-USER_AGENT = "SentinelAI-Endpoints/0.1 (authorized-assessment)"
+AGENT_SUFFIX = "Endpoints"
 MAX_LINKS = 50
 MAX_CRAWL_PAGES = 10  # cap on how many discovered pages we follow one hop into
 
@@ -92,24 +91,21 @@ _CAPTCHA_MARKERS = ["recaptcha", "g-recaptcha", "hcaptcha", "cf-turnstile", "tur
 _MFA_MARKERS = ["otp", "mfa", "totp", "2fa", "verification_code", "auth_code"]
 
 
-class _LinkFormParser(HTMLParser):
+class _LinkFormParser(LinkParser):
     def __init__(self, base_url: str):
-        super().__init__()
-        self.base_url = base_url
-        self.links = set()
+        super().__init__(base_url)
         self.forms = []
         self.body_lower_fragments = []
         self._current_form = None
 
     def handle_starttag(self, tag, attrs):
+        super().handle_starttag(tag, attrs)
         attrs_dict = dict(attrs)
-        if tag == "a" and attrs_dict.get("href"):
-            self.links.add(urljoin(self.base_url, attrs_dict["href"]))
-        elif tag == "script" and attrs_dict.get("src"):
+        if tag == "script" and attrs_dict.get("src"):
             self.body_lower_fragments.append(attrs_dict["src"].lower())
         elif tag == "form":
             self._current_form = {
-                "action": urljoin(self.base_url, attrs_dict.get("action", "")),
+                "action": self.resolve(attrs_dict.get("action", "")),
                 "method": attrs_dict.get("method", "get").upper(),
                 "has_password_field": False,
                 "field_names": [],
@@ -172,24 +168,19 @@ _KNOWN_OAUTH_HOSTS = {
 
 
 def run(target_url: str, context: dict | None = None) -> dict:
-    result = {
-        "module": "endpoints",
-        "target": target_url,
-        "links": [],
-        "forms": [],
-        "external_auth_providers": [],
-        "api_surfaces_found": [],
-        "sensitive_paths_found": [],
-        "directory_listing": False,
-        "errors": [],
-    }
+    result = module_result(
+        "endpoints", target_url,
+        links=[],
+        forms=[],
+        external_auth_providers=[],
+        api_surfaces_found=[],
+        sensitive_paths_found=[],
+        directory_listing=False,
+    )
+    client = HttpClient(AGENT_SUFFIX, result["errors"])
 
-    try:
-        resp = requests.get(
-            target_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True
-        )
-    except requests.RequestException as exc:
-        result["errors"].append(f"GET {target_url} failed: {exc}")
+    resp = client.get(target_url)
+    if resp is None:
         return result
 
     base_url = resp.url
@@ -200,47 +191,30 @@ def run(target_url: str, context: dict | None = None) -> dict:
     directory_listing = "Index of /" in (resp.text or "")
 
     homepage_parser = _LinkFormParser(base_url)
-    try:
-        homepage_parser.feed(resp.text or "")
-    except Exception as exc:
-        result["errors"].append(f"HTML parse error on homepage: {exc}")
+    feed_html(homepage_parser, resp.text, result["errors"], "HTML parse error on homepage")
 
-    same_origin = {l for l in homepage_parser.links if urlparse(l).netloc in ("", base_netloc)}
-    all_links |= same_origin
+    homepage_links = set(same_origin(homepage_parser.links, base_netloc))
+    all_links |= homepage_links
     all_forms.extend(homepage_parser.forms)
 
     # one hop deeper: follow a bounded number of discovered same-origin pages
-    for link in list(same_origin)[:MAX_CRAWL_PAGES]:
-        try:
-            r = requests.get(link, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True)
-        except requests.RequestException:
-            continue
-        if "text/html" not in r.headers.get("Content-Type", ""):
+    for link in list(homepage_links)[:MAX_CRAWL_PAGES]:
+        r = client.get(link, record_error=False)
+        if r is None or "text/html" not in r.headers.get("Content-Type", ""):
             continue
         p = _LinkFormParser(r.url)
-        try:
-            p.feed(r.text or "")
-        except Exception:
+        if not feed_html(p, r.text):
             continue
-        all_links |= {l for l in p.links if urlparse(l).netloc in ("", base_netloc)}
+        all_links |= set(same_origin(p.links, base_netloc))
         all_forms.extend(p.forms)
         if "Index of /" in (r.text or ""):
             directory_listing = True
 
     # guess common app paths not already discovered, using the same soft-404 baseline filter
-    baseline_hash = _get_baseline_hash(target_url)
-    for path in COMMON_PATHS:
-        url = urljoin(target_url, path)
-        if url in all_links:
-            continue
-        try:
-            r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=False)
-        except requests.RequestException:
-            continue
-        if r.status_code == 200 and r.content:
-            content_hash = hashlib.md5(r.content).hexdigest()
-            if baseline_hash is None or content_hash != baseline_hash:
-                all_links.add(url)
+    baseline_hash = _get_baseline_hash(target_url, client)
+    undiscovered = [p for p in COMMON_PATHS if urljoin(target_url, p) not in all_links]
+    for path, _resp in _probe_paths(client, target_url, undiscovered, baseline_hash):
+        all_links.add(urljoin(target_url, path))
 
     # split forms into same-origin (ours to fix) vs third-party auth (not ours to fix)
     external_providers = set()
@@ -261,45 +235,33 @@ def run(target_url: str, context: dict | None = None) -> dict:
     result["external_auth_providers"] = sorted(external_providers)
     result["directory_listing"] = directory_listing
 
-    for path in SENSITIVE_PATHS:
-        url = urljoin(target_url, path)
-        try:
-            r = requests.get(
-                url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=False
-            )
-        except requests.RequestException:
-            continue
-        if r.status_code != 200 or not r.content:
-            continue
-        content_hash = hashlib.md5(r.content).hexdigest()
-        if baseline_hash is not None and content_hash == baseline_hash:
-            continue
+    for path, r in _probe_paths(client, target_url, SENSITIVE_PATHS, baseline_hash):
         result["sensitive_paths_found"].append({"path": path, "size": len(r.content)})
 
-    for path in API_DISCOVERY_PATHS:
-        url = urljoin(target_url, path)
-        try:
-            r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=False)
-        except requests.RequestException:
-            continue
-        if r.status_code != 200 or not r.content:
-            continue
-        content_hash = hashlib.md5(r.content).hexdigest()
-        if baseline_hash is not None and content_hash == baseline_hash:
-            continue
+    for path, _resp in _probe_paths(client, target_url, API_DISCOVERY_PATHS, baseline_hash):
         result["api_surfaces_found"].append(path)
 
     return result
 
 
-def _get_baseline_hash(target_url: str):
+def _probe_paths(client: HttpClient, target_url: str, paths: list, baseline_hash: str | None):
+    """Yield (path, response) for each path that serves real content: a 200 with
+    a body that differs from the soft-404 baseline. Transport errors are skipped
+    silently -- an unreachable guessed path is the expected case, not an error
+    worth reporting."""
+    for path in paths:
+        r = client.get(urljoin(target_url, path), allow_redirects=False, record_error=False)
+        if r is None or r.status_code != 200 or not r.content:
+            continue
+        if baseline_hash is not None and content_hash(r.content) == baseline_hash:
+            continue
+        yield path, r
+
+
+def _get_baseline_hash(target_url: str, client: HttpClient) -> str | None:
     """GET a near-certainly-nonexistent path so real finds can be told apart from soft-404 catch-alls."""
     probe_path = f"__sentinelai_nonexistent_check_{uuid4().hex}__"
-    url = urljoin(target_url, probe_path)
-    try:
-        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=False)
-    except requests.RequestException:
-        return None
-    if r.status_code == 200 and r.content:
-        return hashlib.md5(r.content).hexdigest()
+    r = client.get(urljoin(target_url, probe_path), allow_redirects=False, record_error=False)
+    if r is not None and r.status_code == 200 and r.content:
+        return content_hash(r.content)
     return None
