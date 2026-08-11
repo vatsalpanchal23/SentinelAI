@@ -10,6 +10,7 @@ from database.models import db, Assessment
 from planner.planner import plan_assessment
 from extensions import limiter
 from scoring import compute_risk, SEVERITIES
+from targets import target_address_error
 import worker
 
 dashboard_bp = Blueprint(
@@ -28,7 +29,9 @@ def _validate_target_url(raw: str) -> str | None:
         return "Target URL must start with http:// or https://."
     if not parsed.netloc:
         return "Target URL must include a host (e.g. http://localhost:3000)."
-    return None
+    return target_address_error(
+        raw, allow_private=current_app.config.get("ALLOW_PRIVATE_TARGETS", False)
+    )
 
 
 @dashboard_bp.route("/")
@@ -105,9 +108,16 @@ def assessment_detail(assessment_id):
 @dashboard_bp.route("/assessment/<int:assessment_id>/report")
 def assessment_report(assessment_id):
     assessment = Assessment.query.get_or_404(assessment_id)
-    if not assessment.report_path or not os.path.exists(assessment.report_path):
+    if not assessment.report_path:
         return "Report not generated yet -- it's produced once the assessment finishes.", 404
-    return send_file(assessment.report_path, mimetype="text/html")
+
+    # Only ever serve out of REPORTS_DIR, so a report_path that somehow ends up
+    # pointing elsewhere can't turn this route into arbitrary file read.
+    reports_dir = os.path.realpath(current_app.config["REPORTS_DIR"])
+    path = os.path.realpath(assessment.report_path)
+    if os.path.commonpath([reports_dir, path]) != reports_dir or not os.path.isfile(path):
+        return "Report not generated yet -- it's produced once the assessment finishes.", 404
+    return send_file(path, mimetype="text/html")
 
 
 def _serialize_status(assessment: Assessment) -> dict:

@@ -59,11 +59,17 @@ class ScanEngine:
                         findings_added = _record_findings(db, Finding, assessment_id, run_row.name, output)
                         db.session.commit()
                         logger.info("assessment %s: module '%s' completed, %d finding(s) recorded", assessment_id, run_row.name, findings_added)
-            except Exception:
+            except Exception as exc:
+                # Full traceback goes to the server log only; raw_output is
+                # surfaced in the UI/status API, and a traceback there leaks
+                # filesystem paths and internals.
                 run_row.status = "failed"
-                run_row.raw_output = traceback.format_exc()
+                run_row.raw_output = f"{type(exc).__name__}: {exc}"
                 any_failed = True
-                logger.error("assessment %s: module '%s' failed\n%s", assessment_id, run_row.name, run_row.raw_output)
+                logger.error(
+                    "assessment %s: module '%s' failed\n%s",
+                    assessment_id, run_row.name, traceback.format_exc(),
+                )
 
             run_row.finished_at = datetime.utcnow()
             assessment.progress = int(i / total * 100)
