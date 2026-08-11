@@ -28,6 +28,9 @@ import re
 import shutil
 import subprocess
 
+from common.results import module_result
+from common.severity import normalize_severity
+
 PLUGIN_METADATA = {
     "name": "active_scan",
     "description": "Optional active scanner integration",
@@ -42,46 +45,48 @@ PLUGIN_METADATA = {
 NUCLEI_TIMEOUT_SECONDS = 300
 SQLMAP_TIMEOUT_SECONDS = 300
 
-_NUCLEI_SEVERITY_MAP = {
-    "critical": "critical", "high": "high", "medium": "medium",
-    "low": "low", "info": "info", "unknown": "info",
-}
-
 
 def run(target_url: str, context: dict | None = None) -> dict:
-    result = {
-        "module": "active_scan",
-        "target": target_url,
-        "tools_available": {"nuclei": bool(shutil.which("nuclei")), "sqlmap": bool(shutil.which("sqlmap"))},
-        "nuclei_findings": [],
-        "sqlmap_findings": [],
-        "errors": [],
-    }
+    tools = [
+        ("nuclei", "nuclei_findings", _run_nuclei, NUCLEI_TIMEOUT_SECONDS,
+         "install it to enable template-based scanning"),
+        ("sqlmap", "sqlmap_findings", _run_sqlmap, SQLMAP_TIMEOUT_SECONDS,
+         "install it to enable SQLi detection"),
+    ]
 
-    if shutil.which("nuclei"):
+    result = module_result(
+        "active_scan", target_url,
+        tools_available={tool: bool(shutil.which(tool)) for tool, *_ in tools},
+        nuclei_findings=[],
+        sqlmap_findings=[],
+    )
+
+    for tool, result_key, runner, timeout_seconds, install_hint in tools:
+        if not shutil.which(tool):
+            result["errors"].append(f"{tool} not found on PATH -- {install_hint}")
+            continue
         try:
-            result["nuclei_findings"] = _run_nuclei(target_url)
+            result[result_key] = runner(target_url, result["errors"])
         except subprocess.TimeoutExpired:
-            result["errors"].append(f"nuclei timed out after {NUCLEI_TIMEOUT_SECONDS}s")
+            result["errors"].append(f"{tool} timed out after {timeout_seconds}s")
         except Exception as exc:  # noqa: BLE001 - keep the other tool running even if this one breaks
-            result["errors"].append(f"nuclei run failed: {exc}")
-    else:
-        result["errors"].append("nuclei not found on PATH -- install it to enable template-based scanning")
-
-    if shutil.which("sqlmap"):
-        try:
-            result["sqlmap_findings"] = _run_sqlmap(target_url)
-        except subprocess.TimeoutExpired:
-            result["errors"].append(f"sqlmap timed out after {SQLMAP_TIMEOUT_SECONDS}s")
-        except Exception as exc:  # noqa: BLE001
-            result["errors"].append(f"sqlmap run failed: {exc}")
-    else:
-        result["errors"].append("sqlmap not found on PATH -- install it to enable SQLi detection")
+            result["errors"].append(f"{tool} run failed: {exc}")
 
     return result
 
 
-def _run_nuclei(target_url: str) -> list:
+def _run_tool(cmd: list, timeout_seconds: int, errors: list) -> str:
+    """Run a scanner and return its stdout. A non-zero exit (bad flags, template
+    load failure, unreachable target) usually leaves stdout empty, which parses
+    into zero findings and reads exactly like a clean result, so it is recorded."""
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        errors.append(f"{cmd[0]} exited with code {proc.returncode}: {detail[-1] if detail else 'no output'}")
+    return proc.stdout or ""
+
+
+def _run_nuclei(target_url: str, errors: list) -> list:
     cmd = [
         "nuclei", "-u", target_url,
         "-jsonl",
@@ -89,27 +94,29 @@ def _run_nuclei(target_url: str) -> list:
         "-silent",
         "-timeout", "10",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=NUCLEI_TIMEOUT_SECONDS)
-
     findings = []
-    for line in (proc.stdout or "").splitlines():
+    unparsable = 0
+    for line in _run_tool(cmd, NUCLEI_TIMEOUT_SECONDS, errors).splitlines():
         line = line.strip()
         if not line:
             continue
         try:
             entry = json.loads(line)
         except json.JSONDecodeError:
+            unparsable += 1
             continue
         info = entry.get("info", {})
         findings.append(
             {
                 "template_id": entry.get("template-id") or entry.get("template_id"),
                 "name": info.get("name"),
-                "severity": _NUCLEI_SEVERITY_MAP.get((info.get("severity") or "info").lower(), "info"),
+                "severity": normalize_severity(info.get("severity")),
                 "matched_at": entry.get("matched-at") or entry.get("matched_at") or target_url,
                 "description": info.get("description"),
             }
         )
+    if unparsable:
+        errors.append(f"nuclei: {unparsable} output line(s) were not valid JSON and were ignored")
     return findings
 
 
@@ -117,7 +124,7 @@ _SQLMAP_PARAM_RE = re.compile(r"Parameter:\s*(\S+)\s*\(([^)]+)\)")
 _SQLMAP_TYPE_RE = re.compile(r"Type:\s*(.+)")
 
 
-def _run_sqlmap(target_url: str) -> list:
+def _run_sqlmap(target_url: str, errors: list) -> list:
     """sqlmap's machine-readable output requires a session/output-dir setup;
     v1 parses the human-readable stdout it prints in --batch mode instead.
     This is inherently more brittle than JSON parsing -- if sqlmap changes
@@ -131,8 +138,7 @@ def _run_sqlmap(target_url: str) -> list:
         "--crawl=0",     # we already discovered links via endpoints.py; don't have sqlmap crawl separately
         "--batch-timeout=" + str(SQLMAP_TIMEOUT_SECONDS),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=SQLMAP_TIMEOUT_SECONDS)
-    output = proc.stdout or ""
+    output = _run_tool(cmd, SQLMAP_TIMEOUT_SECONDS, errors)
 
     findings = []
     if "is vulnerable" in output.lower() or "parameter" in output.lower() and "injectable" in output.lower():

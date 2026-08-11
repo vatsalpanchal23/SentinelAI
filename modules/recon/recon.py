@@ -6,13 +6,13 @@ info, security.txt, whether HTTP redirects to HTTPS, and (for https targets)
 TLS certificate expiry/protocol info.
 """
 
-import hashlib
 import socket
 import ssl
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
 
-import requests
+from common.http import HttpClient, content_hash
+from common.results import module_result
 
 PLUGIN_METADATA = {
     "name": "recon",
@@ -25,67 +25,57 @@ PLUGIN_METADATA = {
 }
 
 
+AGENT_SUFFIX = "Recon"
 TIMEOUT = 8
-USER_AGENT = "SentinelAI-Recon/0.1 (authorized-assessment)"
 
 
 def run(target_url: str, context: dict | None = None) -> dict:
-    result = {
-        "module": "recon",
-        "target": target_url,
-        "server": None,
-        "headers": {},
-        "robots_txt": None,
-        "sitemap": None,
-        "security_txt": None,
-        "favicon_hash": None,
-        "dns": {},
-        "https_redirect": None,
-        "tls": {},
-        "errors": [],
-    }
+    result = module_result(
+        "recon", target_url,
+        server=None,
+        headers={},
+        robots_txt=None,
+        sitemap=None,
+        security_txt=None,
+        favicon_hash=None,
+        dns={},
+        https_redirect=None,
+        tls={},
+    )
+    client = HttpClient(AGENT_SUFFIX, result["errors"], timeout=TIMEOUT)
 
-    resp = _get(target_url, result)
+    resp = client.get(target_url)
     if resp is not None:
         result["headers"] = dict(resp.headers)
         result["server"] = resp.headers.get("Server")
 
-    robots = _get(urljoin(target_url, "/robots.txt"), result, record_error=False)
+    robots = client.get(urljoin(target_url, "/robots.txt"), record_error=False)
     if robots is not None and robots.status_code == 200:
         result["robots_txt"] = robots.text[:5000]
 
-    sitemap = _get(urljoin(target_url, "/sitemap.xml"), result, record_error=False)
+    sitemap = client.get(urljoin(target_url, "/sitemap.xml"), record_error=False)
     if sitemap is not None and sitemap.status_code == 200:
         result["sitemap"] = sitemap.text[:5000]
 
     # RFC 9116 security.txt -- a documented disclosure contact is good practice,
     # its absence isn't a vuln, just noted informationally.
-    sec_txt = _get(urljoin(target_url, "/.well-known/security.txt"), result, record_error=False)
+    sec_txt = client.get(urljoin(target_url, "/.well-known/security.txt"), record_error=False)
     if sec_txt is not None and sec_txt.status_code == 200:
         result["security_txt"] = sec_txt.text[:2000]
 
-    favicon = _get(urljoin(target_url, "/favicon.ico"), result, record_error=False)
+    favicon = client.get(urljoin(target_url, "/favicon.ico"), record_error=False)
     if favicon is not None and favicon.status_code == 200 and favicon.content:
-        result["favicon_hash"] = hashlib.md5(favicon.content).hexdigest()
+        result["favicon_hash"] = content_hash(favicon.content)
 
     result["dns"] = _resolve_dns(target_url, result)
 
     parsed = urlparse(target_url)
     if parsed.scheme == "http":
-        result["https_redirect"] = _check_https_redirect(target_url, result)
+        result["https_redirect"] = _check_https_redirect(target_url, client)
     elif parsed.scheme == "https":
         result["tls"] = _check_tls(parsed.hostname, parsed.port or 443, result)
 
     return result
-
-
-def _get(url: str, result: dict, record_error: bool = True):
-    try:
-        return requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True)
-    except requests.RequestException as exc:
-        if record_error:
-            result["errors"].append(f"GET {url} failed: {exc}")
-        return None
 
 
 def _resolve_dns(target_url: str, result: dict) -> dict:
@@ -99,15 +89,11 @@ def _resolve_dns(target_url: str, result: dict) -> dict:
         return {"hostname": hostname, "addresses": []}
 
 
-def _check_https_redirect(http_url: str, result: dict) -> dict:
+def _check_https_redirect(http_url: str, client: HttpClient) -> dict:
     """Does the plain-HTTP site redirect to HTTPS, or serve content over
     unencrypted HTTP indefinitely?"""
-    try:
-        resp = requests.get(
-            http_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True
-        )
-    except requests.RequestException as exc:
-        result["errors"].append(f"HTTPS-redirect check failed: {exc}")
+    resp = client.get(http_url, error_label="HTTPS-redirect check")
+    if resp is None:
         return {"redirects_to_https": None}
     final_scheme = urlparse(resp.url).scheme
     return {"redirects_to_https": final_scheme == "https", "final_url": resp.url}
@@ -135,8 +121,11 @@ def _check_tls(hostname: str, port: int, result: dict) -> dict:
         try:
             expiry = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
             days_remaining = (expiry - datetime.utcnow()).days
-        except ValueError:
-            pass
+        except ValueError as exc:
+            # days_remaining stays None, which silently disables the
+            # expired/expiring-soon findings -- say so rather than reporting a
+            # certificate as fine when we simply couldn't read its expiry.
+            result["errors"].append(f"could not parse certificate expiry '{not_after}': {exc}")
 
     issuer = dict(x[0] for x in cert.get("issuer", []))
     return {

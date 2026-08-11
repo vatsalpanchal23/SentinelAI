@@ -9,10 +9,11 @@ here executes the JS or submits anything.
 """
 
 import re
-from html.parser import HTMLParser
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
-import requests
+from common.html import BaseTagParser, feed_html, same_origin
+from common.http import HttpClient
+from common.results import module_result
 
 PLUGIN_METADATA = {
     "name": "javascript",
@@ -25,8 +26,7 @@ PLUGIN_METADATA = {
 }
 
 
-TIMEOUT = 8
-USER_AGENT = "SentinelAI-JSAnalysis/0.1 (authorized-assessment)"
+AGENT_SUFFIX = "JSAnalysis"
 MAX_JS_FILES = 15
 MAX_BYTES_PER_FILE = 2_000_000
 
@@ -56,10 +56,9 @@ _INTERNAL_URL_RE = re.compile(
 _JQUERY_VERSION_RE = re.compile(r"jQuery\s+v?(\d+)\.(\d+)\.(\d+)", re.IGNORECASE)
 
 
-class _ScriptTagParser(HTMLParser):
+class _ScriptTagParser(BaseTagParser):
     def __init__(self, base_url: str):
-        super().__init__()
-        self.base_url = base_url
+        super().__init__(base_url)
         self.script_srcs = []
         self.inline_scripts = []
         self._in_script = False
@@ -70,7 +69,7 @@ class _ScriptTagParser(HTMLParser):
             return
         attrs_dict = dict(attrs)
         if attrs_dict.get("src"):
-            self.script_srcs.append(urljoin(self.base_url, attrs_dict["src"]))
+            self.script_srcs.append(self.resolve(attrs_dict["src"]))
         else:
             self._in_script = True
             self._current_inline = []
@@ -86,36 +85,28 @@ class _ScriptTagParser(HTMLParser):
 
 
 def run(target_url: str, context: dict | None = None) -> dict:
-    result = {
-        "module": "javascript",
-        "target": target_url,
-        "js_files": [],
-        "secrets_found": [],
-        "internal_urls_found": [],
-        "exposed_source_maps": [],
-        "risky_sinks": [],
-        "outdated_libraries": [],
-        "errors": [],
-    }
+    result = module_result(
+        "javascript", target_url,
+        js_files=[],
+        secrets_found=[],
+        internal_urls_found=[],
+        exposed_source_maps=[],
+        risky_sinks=[],
+        outdated_libraries=[],
+    )
+    client = HttpClient(AGENT_SUFFIX, result["errors"])
 
-    try:
-        resp = requests.get(
-            target_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True
-        )
-    except requests.RequestException as exc:
-        result["errors"].append(f"GET {target_url} failed: {exc}")
+    resp = client.get(target_url)
+    if resp is None:
         return result
 
     base_url = resp.url
     base_netloc = urlparse(base_url).netloc
 
     parser = _ScriptTagParser(base_url)
-    try:
-        parser.feed(resp.text or "")
-    except Exception as exc:
-        result["errors"].append(f"HTML parse error: {exc}")
+    feed_html(parser, resp.text, result["errors"])
 
-    same_origin_js = [u for u in parser.script_srcs if urlparse(u).netloc in ("", base_netloc)][:MAX_JS_FILES]
+    same_origin_js = same_origin(parser.script_srcs, base_netloc)[:MAX_JS_FILES]
     result["js_files"] = same_origin_js
 
     bodies = {}  # url -> text, for inline scripts key is "" 
@@ -123,24 +114,17 @@ def run(target_url: str, context: dict | None = None) -> dict:
         bodies["(inline)"] = "\n".join(parser.inline_scripts)
 
     for js_url in same_origin_js:
-        try:
-            r = requests.get(js_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, stream=True)
-            content = r.raw.read(MAX_BYTES_PER_FILE, decode_content=True)
-            text = content.decode("utf-8", errors="replace")
-        except requests.RequestException as exc:
-            result["errors"].append(f"GET {js_url} failed: {exc}")
+        r = client.get(js_url, stream=True)
+        if r is None:
             continue
-        bodies[js_url] = text
+        bodies[js_url] = r.raw.read(MAX_BYTES_PER_FILE, decode_content=True).decode("utf-8", errors="replace")
 
         # source map exposure: <file>.js.map reachable?
         if js_url.endswith(".js"):
             map_url = js_url + ".map"
-            try:
-                map_resp = requests.head(map_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
-                if map_resp.status_code == 200:
-                    result["exposed_source_maps"].append(map_url)
-            except requests.RequestException:
-                pass
+            map_resp = client.head(map_url, error_label=f"source-map check for {map_url}")
+            if map_resp is not None and map_resp.status_code == 200:
+                result["exposed_source_maps"].append(map_url)
 
     for source, text in bodies.items():
         for label, pattern, severity in SECRET_PATTERNS:

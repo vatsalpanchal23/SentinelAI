@@ -37,6 +37,10 @@ class ModuleRun(db.Model):
     started_at = db.Column(db.DateTime, nullable=True)
     finished_at = db.Column(db.DateTime, nullable=True)
     raw_output = db.Column(db.Text, nullable=True)
+    # newline-separated non-fatal problems the module reported while still
+    # completing (failed requests, unparsable HTML, missing external tools) --
+    # kept separate from raw_output so the UI/API can surface them.
+    errors = db.Column(db.Text, nullable=True)
 
 
 class Finding(db.Model):
@@ -75,12 +79,18 @@ def ensure_schema_migrations():
     from sqlalchemy import inspect, text
 
     inspector = inspect(db.engine)
-    if "assessments" not in inspector.get_table_names():
-        return  # db.create_all() will have made it fresh with all columns already
+    table_names = inspector.get_table_names()
 
-    existing_cols = {c["name"] for c in inspector.get_columns("assessments")}
-    with db.engine.begin() as conn:
-        if "authorized" not in existing_cols:
-            conn.execute(text("ALTER TABLE assessments ADD COLUMN authorized BOOLEAN DEFAULT 0"))
-        if "active_scan_enabled" not in existing_cols:
-            conn.execute(text("ALTER TABLE assessments ADD COLUMN active_scan_enabled BOOLEAN DEFAULT 0"))
+    if "assessments" in table_names:
+        existing_cols = {c["name"] for c in inspector.get_columns("assessments")}
+        with db.engine.begin() as conn:
+            if "authorized" not in existing_cols:
+                conn.execute(text("ALTER TABLE assessments ADD COLUMN authorized BOOLEAN DEFAULT 0"))
+            if "active_scan_enabled" not in existing_cols:
+                conn.execute(text("ALTER TABLE assessments ADD COLUMN active_scan_enabled BOOLEAN DEFAULT 0"))
+
+    if "module_runs" in table_names:
+        existing_cols = {c["name"] for c in inspector.get_columns("module_runs")}
+        with db.engine.begin() as conn:
+            if "errors" not in existing_cols:
+                conn.execute(text("ALTER TABLE module_runs ADD COLUMN errors TEXT"))

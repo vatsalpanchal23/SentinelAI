@@ -45,6 +45,9 @@
       </span>
     </span>
   </div>
+  {% if m.errors %}
+  <div class="px-4 pb-2 text-xs text-amber-400/90 whitespace-pre-line" data-module-errors="{{ m.name }}">{{ m.errors }}</div>
+  {% endif %}
   {% if m.status == 'failed' %}
   <div class="px-4 pb-2 text-xs text-red-400" data-module-failure="{{ m.name }}">{{ m.raw_output }}</div>
   {% endif %}

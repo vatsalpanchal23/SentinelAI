@@ -27,6 +27,9 @@ import re
 
 import requests
 
+from common.results import module_result
+from common.severity import normalize_severity, severity_from_cvss
+
 OSV_ENDPOINT = "https://api.osv.dev/v1/query"
 PLUGIN_METADATA = {
     "name": "cve",
@@ -45,14 +48,16 @@ _WERKZEUG_RE = re.compile(r"Werkzeug/(\d+\.\d+(?:\.\d+)?)", re.IGNORECASE)
 
 
 def run(target_url: str, context: dict | None = None) -> dict:
-    result = {"module": "cve", "target": target_url, "matches": [], "errors": []}
+    result = module_result("cve", target_url, matches=[])
     context = context or {}
 
     packages = _identify_packages(context)
     for name, ecosystem, version, source in packages:
         try:
             vulns = _query_osv(name, ecosystem, version)
-        except requests.RequestException as exc:
+        except (requests.RequestException, ValueError) as exc:
+            # ValueError covers a 200 response whose body isn't JSON, which
+            # older requests versions raise as a plain JSONDecodeError.
             result["errors"].append(f"OSV lookup failed for {name}@{version}: {exc}")
             continue
         for v in vulns:
@@ -102,21 +107,15 @@ def _extract_severity(vuln: dict) -> str:
     normalize to our critical/high/medium/low/info scale, defaulting to
     medium rather than guessing wrong in either direction."""
     db_specific = vuln.get("database_specific") or {}
-    label = (db_specific.get("severity") or "").upper()
-    if label in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
-        return label.lower()
+    # "info" isn't a label OSV assigns here, so an unusable value falls through
+    # to the CVSS scores below rather than being reported as informational.
+    label = normalize_severity(db_specific.get("severity"), default="info")
+    if label != "info":
+        return label
 
     for entry in vuln.get("severity") or []:
-        score_str = entry.get("score", "")
-        cvss_match = re.search(r"(\d+(?:\.\d+)?)", score_str)
+        cvss_match = re.search(r"(\d+(?:\.\d+)?)", entry.get("score", ""))
         if cvss_match:
-            score = float(cvss_match.group(1))
-            if score >= 9.0:
-                return "critical"
-            if score >= 7.0:
-                return "high"
-            if score >= 4.0:
-                return "medium"
-            return "low"
+            return severity_from_cvss(float(cvss_match.group(1)))
 
     return "medium"

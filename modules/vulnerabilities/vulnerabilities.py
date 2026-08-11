@@ -22,10 +22,11 @@ All probes are capped in count so this doesn't hammer the target.
 """
 
 import re
-from html.parser import HTMLParser
-from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
-import requests
+from common.html import LinkParser, feed_html, same_origin
+from common.http import HttpClient
+from common.results import module_result
 
 PLUGIN_METADATA = {
     "name": "vulnerabilities",
@@ -38,8 +39,7 @@ PLUGIN_METADATA = {
 }
 
 
-TIMEOUT = 8
-USER_AGENT = "SentinelAI-VulnCheck/0.1 (authorized-assessment)"
+AGENT_SUFFIX = "VulnCheck"
 MAX_PARAM_PROBES = 20
 REDIRECT_TEST_HOST = "sentinelai-redirect-poc.invalid"
 XSS_CANARY = "sentinelXSSpoc\"'<>"
@@ -62,32 +62,19 @@ _REDIRECT_PARAM_NAMES = {"redirect", "redirect_uri", "redirecturl", "next", "ret
 _DANGEROUS_METHODS = {"PUT", "DELETE", "TRACE", "CONNECT"}
 
 
-class _LinkParser(HTMLParser):
-    def __init__(self, base_url: str):
-        super().__init__()
-        self.base_url = base_url
-        self.links = set()
-
-    def handle_starttag(self, tag, attrs):
-        attrs_dict = dict(attrs)
-        if tag == "a" and attrs_dict.get("href"):
-            self.links.add(urljoin(self.base_url, attrs_dict["href"]))
-
-
 def run(target_url: str, context: dict | None = None) -> dict:
-    result = {
-        "module": "vulnerabilities",
-        "target": target_url,
-        "dangerous_methods": [],
-        "reflected_params": [],
-        "sqli_indicators": [],
-        "open_redirects": [],
-        "errors": [],
-    }
+    result = module_result(
+        "vulnerabilities", target_url,
+        dangerous_methods=[],
+        reflected_params=[],
+        sqli_indicators=[],
+        open_redirects=[],
+    )
+    client = HttpClient(AGENT_SUFFIX, result["errors"])
 
-    result["dangerous_methods"] = _check_http_methods(target_url, result)
+    result["dangerous_methods"] = _check_http_methods(target_url, client)
 
-    candidate_links = _candidate_links(target_url, context, result)
+    candidate_links = _candidate_links(target_url, context, client, result)
 
     param_candidates = []  # (url, param_name)
     for link in candidate_links:
@@ -99,15 +86,15 @@ def run(target_url: str, context: dict | None = None) -> dict:
     param_candidates = param_candidates[:MAX_PARAM_PROBES]
 
     for link, param_name in param_candidates:
-        _probe_reflection(link, param_name, result)
-        _probe_sqli(link, param_name, result)
+        _probe_reflection(link, param_name, client, result)
+        _probe_sqli(link, param_name, client, result)
         if param_name.lower().replace("_", "") in {p.replace("_", "") for p in _REDIRECT_PARAM_NAMES}:
-            _probe_open_redirect(link, param_name, result)
+            _probe_open_redirect(link, param_name, client, result)
 
     return result
 
 
-def _candidate_links(target_url: str, context: dict | None, result: dict) -> list:
+def _candidate_links(target_url: str, context: dict | None, client: HttpClient, result: dict) -> list:
     """Prefer the endpoints module's depth-2 crawl (much broader surface) when
     available via context; fall back to a homepage-only crawl so this module
     still works standalone (e.g. under test, or if endpoints failed)."""
@@ -123,19 +110,13 @@ def _candidate_links(target_url: str, context: dict | None, result: dict) -> lis
             form_links.append(f"{form['action']}?{fake_query}")
         return links_with_query + form_links
 
-    try:
-        resp = requests.get(target_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=True)
-    except requests.RequestException as exc:
-        result["errors"].append(f"GET {target_url} failed: {exc}")
+    resp = client.get(target_url)
+    if resp is None:
         return []
 
-    base_netloc = urlparse(resp.url).netloc
-    parser = _LinkParser(resp.url)
-    try:
-        parser.feed(resp.text or "")
-    except Exception as exc:
-        result["errors"].append(f"HTML parse error: {exc}")
-    return [l for l in parser.links if urlparse(l).netloc in ("", base_netloc)]
+    parser = LinkParser(resp.url)
+    feed_html(parser, resp.text, result["errors"])
+    return same_origin(parser.links, urlparse(resp.url).netloc)
 
 
 def _replace_param(url: str, param_name: str, new_value: str) -> str:
@@ -146,34 +127,28 @@ def _replace_param(url: str, param_name: str, new_value: str) -> str:
     return urlunparse(parsed._replace(query=new_query))
 
 
-def _check_http_methods(target_url: str, result: dict) -> list:
-    try:
-        resp = requests.options(target_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
-    except requests.RequestException as exc:
-        result["errors"].append(f"OPTIONS {target_url} failed: {exc}")
+def _check_http_methods(target_url: str, client: HttpClient) -> list:
+    resp = client.options(target_url)
+    if resp is None:
         return []
     allow = resp.headers.get("Allow", "")
     methods = {m.strip().upper() for m in allow.split(",") if m.strip()}
     return sorted(methods & _DANGEROUS_METHODS)
 
 
-def _probe_reflection(link: str, param_name: str, result: dict) -> None:
+def _probe_reflection(link: str, param_name: str, client: HttpClient, result: dict) -> None:
     probe_url = _replace_param(link, param_name, XSS_CANARY)
-    try:
-        resp = requests.get(probe_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
-    except requests.RequestException as exc:
-        result["errors"].append(f"Reflection probe on {link} failed: {exc}")
+    resp = client.get(probe_url, error_label=f"Reflection probe on {link}")
+    if resp is None:
         return
     if XSS_CANARY in (resp.text or ""):
         result["reflected_params"].append({"url": link, "param": param_name})
 
 
-def _probe_sqli(link: str, param_name: str, result: dict) -> None:
+def _probe_sqli(link: str, param_name: str, client: HttpClient, result: dict) -> None:
     probe_url = _replace_param(link, param_name, "sentinelai'probe")
-    try:
-        resp = requests.get(probe_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
-    except requests.RequestException as exc:
-        result["errors"].append(f"SQLi probe on {link} failed: {exc}")
+    resp = client.get(probe_url, error_label=f"SQLi probe on {link}")
+    if resp is None:
         return
     body = resp.text or ""
     for pattern in _SQLI_ERROR_SIGNATURES:
@@ -182,13 +157,11 @@ def _probe_sqli(link: str, param_name: str, result: dict) -> None:
             return
 
 
-def _probe_open_redirect(link: str, param_name: str, result: dict) -> None:
+def _probe_open_redirect(link: str, param_name: str, client: HttpClient, result: dict) -> None:
     test_target = f"https://{REDIRECT_TEST_HOST}/"
     probe_url = _replace_param(link, param_name, test_target)
-    try:
-        resp = requests.get(probe_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, allow_redirects=False)
-    except requests.RequestException as exc:
-        result["errors"].append(f"Open-redirect probe on {link} failed: {exc}")
+    resp = client.get(probe_url, allow_redirects=False, error_label=f"Open-redirect probe on {link}")
+    if resp is None:
         return
     location = resp.headers.get("Location", "")
     if REDIRECT_TEST_HOST in location:

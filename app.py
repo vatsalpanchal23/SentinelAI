@@ -39,8 +39,15 @@ def create_app(config_class=Config):
     auth.init_app(app)
 
     # Discover scanner plugins during startup so import/metadata errors surface
-    # early while preserving a lightweight worker entry point.
-    worker.get_registry()
+    # early while preserving a lightweight worker entry point. The registry
+    # collects load failures instead of raising, so they have to be reported
+    # here or a module silently disappears from every pipeline.
+    registry = worker.get_registry()
+    for load_error in registry.errors:
+        logger.error(
+            "scanner module '%s' failed to load and will be skipped in every assessment: %s",
+            load_error.module_name, load_error.error,
+        )
 
     from dashboard.routes import dashboard_bp
     app.register_blueprint(dashboard_bp)
