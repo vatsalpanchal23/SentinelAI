@@ -1,31 +1,35 @@
 # SentinelAI
 
-SentinelAI is an evidence-driven web vulnerability assessment console. It runs authorized browser-based scans and produces branded, timestamped reports with findings, evidence, exposure paths, remediation plans, and coverage limitations.
+AI-powered Web Application Security Assessment Framework.
 
 ## Setup
 
 ```bash
-pnpm install
-pnpm run dev
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+python app.py
 ```
 
-Open the local URL printed by Vite. The development server defaults to port 5173 and the production build defaults to `/` as its base path.
-
-## Commands
-
-```bash
-pnpm run typecheck
-pnpm run build
-pnpm run serve
-```
+Visit http://localhost:5000
 
 ## Security posture
 
-- Only scan targets for which you have written authorization.
-- Scope rules are applied by the scanner before requests are made.
-- Findings are evidence-bound; unavailable or failed modules are reported instead of inferred.
-- AI analysis is clearly labeled as inference and is not treated as scanner evidence.
+- Binds to `127.0.0.1` and runs with the debugger off by default (`HOST` / `FLASK_DEBUG`).
+  Serving on another interface requires `AUTH_PASSWORD_HASH` (or `AUTH_PASSWORD`) —
+  the app refuses to start otherwise, and never starts off-loopback with the debugger on.
+- With credentials configured, every route is behind HTTP Basic auth.
+- Submitted targets that resolve to loopback/private addresses are rejected unless
+  `ALLOW_PRIVATE_TARGETS=true`; link-local/metadata and reserved ranges are always rejected.
+- `SECRET_KEY` unset means a random per-process key, never a shipped default.
 
-## Reporting
+## Structure
 
-Completed assessments can be downloaded as self-contained HTML, printed or saved as PDF, or exported as plain text. Each finding includes an explanation of how the condition can be exposed and an ordered remediation plan.
+- `dashboard/` — Flask blueprint: assessment list, target input, detail views
+- `planner/` — decides which modules run for an assessment
+- `modules/` — recon, fingerprint, endpoints, javascript, headers, vulnerabilities, reporting
+- `ai/` — LLM client + correlation engine
+- `database/` — SQLAlchemy models (Assessment, ModuleRun, Finding, Evidence)
+- `evidence/` / `reports/` — generated artifacts
+- `config/` — app settings
