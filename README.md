@@ -33,3 +33,16 @@ Visit http://localhost:5000
 - `database/` — SQLAlchemy models (Assessment, ModuleRun, Finding, Evidence)
 - `evidence/` / `reports/` — generated artifacts
 - `config/` — app settings
+
+## SentinelAI React Console updates
+
+This branch documents the updated SentinelAI security-assessment console work. The interface is designed for authorized, evidence-driven web assessments and includes:
+
+- A dark theme enabled by default for new sessions, with a persistent light/dark toggle.
+- Downloadable professional reports instead of email-based reporting. Reports can be exported as self-contained branded HTML, printed or saved as PDF, or downloaded as plain text.
+- SentinelAI branding, logo watermarking, exact report-generation timestamps, scan timestamps, authorization details, findings, evidence, inventory, attack paths, AI status, and coverage limitations.
+- Expandable finding guidance that explains step by step how a vulnerability can be exposed, followed by ordered remediation and verification steps.
+- Guidance for HTTPS, HSTS, CSP, cookies, CORS, exposed files, directory listings, DNS and email security, CAA, version disclosure, and known CVEs.
+- Responsive assessment and results layouts, including mobile-safe form behavior.
+
+Reports are generated locally in the browser. No email or external reporting service is required. Only scan systems for which you have explicit authorization.
