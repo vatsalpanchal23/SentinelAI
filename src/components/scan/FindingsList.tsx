@@ -4,11 +4,11 @@ import { ChevronDown, ChevronRight, ShieldAlert } from "lucide-react";
 
 const SEV_ORDER: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 const SEV_STYLE: Record<Severity, string> = {
-  critical: "border-red-500/60 bg-red-500/10 text-red-500",
-  high: "border-orange-500/60 bg-orange-500/10 text-orange-500",
-  medium: "border-yellow-500/60 bg-yellow-500/10 text-yellow-600",
-  low: "border-sky-500/60 bg-sky-500/10 text-sky-500",
-  info: "border-border/60 bg-muted/40 text-muted-foreground",
+  critical: "severity-critical",
+  high: "severity-high",
+  medium: "severity-medium",
+  low: "severity-low",
+  info: "severity-info",
 };
 
 export function FindingsList({ findings, evidence }: { findings: Finding[]; evidence: Evidence[] }) {
@@ -39,6 +39,9 @@ export function FindingsList({ findings, evidence }: { findings: Finding[]; evid
         {sorted.map((f) => (
           <li key={f.id}>
             <button
+              type="button"
+              aria-expanded={open === f.id}
+              aria-controls={`finding-detail-${f.id}`}
               onClick={() => setOpen(open === f.id ? null : f.id)}
               className="flex w-full items-start gap-3 px-5 py-3 text-left hover:bg-muted/20"
             >
@@ -56,7 +59,7 @@ export function FindingsList({ findings, evidence }: { findings: Finding[]; evid
               </div>
             </button>
             {open === f.id && (
-              <div className="grid gap-4 border-t border-border/40 bg-muted/10 px-5 py-4 text-sm md:grid-cols-2">
+              <div id={`finding-detail-${f.id}`} className="grid gap-4 border-t border-border/40 bg-muted/10 px-5 py-4 text-sm md:grid-cols-2">
                 <div>
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Description</h4>
                   <p className="mt-1">{f.description}</p>
