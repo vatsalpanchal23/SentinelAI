@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
-import { Activity, ChevronRight, CircleDot, FileCheck2, Moon, ShieldCheck, Sun, Target, Waves } from "lucide-react";
+import { Activity, ChevronRight, CircleDot, FileCheck2, Moon, Sun, Target, Waves } from "lucide-react";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -16,10 +16,20 @@ function Brand() {
   return (
     <div className="flex items-center gap-3">
       <div className="brand-mark grid h-10 w-10 place-items-center rounded-xl">
-        <ShieldCheck className="h-6 w-6" strokeWidth={2.3} />
+        <svg
+          aria-hidden="true"
+          className="relative z-[1] h-7 w-7"
+          viewBox="0 0 32 32"
+          fill="none"
+        >
+          <path d="M16 3.75 26.25 8v7.15c0 6.3-4.2 10.82-10.25 13.1C9.95 25.97 5.75 21.45 5.75 15.15V8L16 3.75Z" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M16 9.25v13.5M9.25 16h13.5" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" opacity=".72" />
+          <circle cx="16" cy="16" r="3.15" fill="currentColor" />
+          <path d="m23.7 8.95 1.35-1.35M8.3 8.95 6.95 7.6" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
+        </svg>
       </div>
       <div>
-        <div className="brand-wordmark text-[15px] font-extrabold tracking-[0.13em]">SENTINEL<span className="brand-ai">AI</span></div>
+        <div className="brand-wordmark text-[15px] font-bold tracking-[0.15em]">SENTINEL<span className="brand-ai">AI</span></div>
         <div className="brand-subtitle mt-0.5 text-[9px] font-bold uppercase tracking-[0.16em]">Security console</div>
       </div>
     </div>
@@ -94,7 +104,7 @@ function Home() {
             <div className="mb-7 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
               <div>
                 <div className="mb-2 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.2em] text-primary"><span className="h-1.5 w-1.5 rounded-full bg-primary" /> Assessment workspace</div>
-                <h1 className="text-3xl font-extrabold tracking-[-0.04em] text-foreground sm:text-4xl">See what the surface reveals.</h1>
+                <h1 className="workspace-title text-3xl font-bold tracking-[-0.045em] text-foreground sm:text-4xl">See what the surface reveals.</h1>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Run a scoped, evidence-driven vulnerability assessment against an authorized target. Results stay grounded in what the scanner actually observed.</p>
               </div>
               <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Run ID <span className="font-medium text-foreground/80">{scan.data ? scan.data.startedAt.slice(0, 16).replace("T", " / ") : "Awaiting target"}</span></div>
