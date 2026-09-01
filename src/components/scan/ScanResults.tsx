@@ -29,8 +29,10 @@ type Props = {
 export function ScanResults({ config, scan, ai, onRequestAi }: Props) {
   if (!config && !scan.data && !scan.isPending) {
     return (
-      <section data-testid="state-no-assessment" className="rounded-2xl border border-dashed border-border/70 bg-card/70 p-10 text-center">
-        <Info className="mx-auto h-8 w-8 text-muted-foreground" />
+      <section data-testid="state-no-assessment" className="empty-assessment rounded-2xl border border-dashed border-border/70 bg-card/70 p-10 text-center">
+        <div className="empty-assessment-icon mx-auto grid h-12 w-12 place-items-center rounded-2xl">
+          <Info className="h-6 w-6" />
+        </div>
         <h2 className="mt-3 text-base font-semibold">No assessment running</h2>
         <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
           Configure a target on the left. The scanner performs live reconnaissance and analysis — no simulated data is ever produced.
@@ -93,6 +95,7 @@ export function ScanResults({ config, scan, ai, onRequestAi }: Props) {
             </p>
           </div>
           <button
+            type="button"
             onClick={onRequestAi}
             disabled={ai.isPending}
             className="inline-flex items-center gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-60"
@@ -123,11 +126,11 @@ export function ScanResults({ config, scan, ai, onRequestAi }: Props) {
 
 function SeverityCell({ label, value, tone }: { label: string; value: number; tone: "critical" | "high" | "medium" | "low" | "info" }) {
   const tones: Record<string, string> = {
-    critical: "border-red-500/50 bg-red-500/10 text-red-500",
-    high: "border-orange-500/50 bg-orange-500/10 text-orange-500",
-    medium: "border-yellow-500/50 bg-yellow-500/10 text-yellow-600",
-    low: "border-sky-500/50 bg-sky-500/10 text-sky-500",
-    info: "border-border/60 bg-muted/40 text-muted-foreground",
+    critical: "severity-critical",
+    high: "severity-high",
+    medium: "severity-medium",
+    low: "severity-low",
+    info: "severity-info",
   };
   return (
     <div className={`rounded-md border p-3 ${tones[tone]}`}>
