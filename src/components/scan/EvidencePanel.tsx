@@ -7,7 +7,7 @@ export function EvidencePanel({ evidence }: { evidence: Evidence[] }) {
   if (evidence.length === 0) return null;
   return (
     <section className="rounded-lg border border-border/60 bg-card">
-      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 p-5 text-left">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 p-5 text-left">
         <FileText className="h-4 w-4" />
         <span className="text-sm font-semibold">Full evidence log ({evidence.length})</span>
         <span className="ml-auto text-xs text-muted-foreground">{open ? "Hide" : "Show"}</span>
