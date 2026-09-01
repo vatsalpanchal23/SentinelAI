@@ -22,10 +22,10 @@ function Brand() {
           viewBox="0 0 32 32"
           fill="none"
         >
-          <path d="M16 3.75 26.25 8v7.15c0 6.3-4.2 10.82-10.25 13.1C9.95 25.97 5.75 21.45 5.75 15.15V8L16 3.75Z" stroke="currentColor" strokeWidth="1.7" />
-          <path d="M16 9.25v13.5M9.25 16h13.5" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" opacity=".72" />
-          <circle cx="16" cy="16" r="3.15" fill="currentColor" />
-          <path d="m23.7 8.95 1.35-1.35M8.3 8.95 6.95 7.6" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
+          <path d="M16 3.35 26.3 8v6.85c0 6.35-3.8 10.95-10.3 13.65-6.5-2.7-10.3-7.3-10.3-13.65V8L16 3.35Z" fill="currentColor" />
+          <path d="M9.05 15.9c2.2-3 4.52-4.5 6.95-4.5s4.75 1.5 6.95 4.5c-2.2 3-4.52 4.5-6.95 4.5s-4.75-1.5-6.95-4.5Z" fill="var(--brand-teal)" />
+          <circle cx="16" cy="15.9" r="2.35" fill="currentColor" />
+          <path d="M16 7.3v2.35M16 22.15v2.35" stroke="var(--brand-teal)" strokeWidth="1.35" strokeLinecap="round" opacity=".8" />
         </svg>
       </div>
       <div>
