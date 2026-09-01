@@ -167,6 +167,7 @@
   --spacing: 0.25rem;
 
   --brand-ink: #173b38;
+  --brand-mark-ink: #153f39;
   --brand-teal: #83dfc6;
   --brand-teal-strong: #087b6c;
   --brand-subtitle: #637a74;
@@ -329,6 +330,7 @@
   --shadow-2xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0);
 
   --brand-ink: #dcf3eb;
+  --brand-mark-ink: #153f39;
   --brand-teal: #83dfc6;
   --brand-teal-strong: #83dfc6;
   --brand-subtitle: #8eaba3;
@@ -519,18 +521,35 @@
 .brand-mark {
   position: relative;
   overflow: hidden;
-  background: var(--brand-ink);
-  color: var(--brand-teal);
+  background: linear-gradient(
+    145deg,
+    var(--brand-teal) 0%,
+    color-mix(in srgb, var(--brand-teal) 72%, var(--brand-teal-strong)) 100%
+  );
+  color: var(--brand-mark-ink);
   border: 1px solid color-mix(in srgb, var(--brand-teal) 42%, transparent);
-  box-shadow: 0 8px 22px hsl(164 50% 18% / .18);
+  box-shadow: 0 8px 22px hsl(164 50% 18% / .2), inset 0 1px 0 rgb(255 255 255 / .22);
+}
+
+.brand-mark::before {
+  content: "";
+  position: absolute;
+  width: 1.75rem;
+  height: 1.75rem;
+  top: -0.85rem;
+  right: -0.55rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / .2);
+  filter: blur(8px);
+  pointer-events: none;
 }
 
 .brand-mark::after {
   content: "";
   position: absolute;
-  inset: 3px;
-  border: 1px solid color-mix(in srgb, var(--brand-teal) 24%, transparent);
-  border-radius: 9px;
+  inset: 4px;
+  border: 1px solid color-mix(in srgb, var(--brand-ink) 18%, transparent);
+  border-radius: 8px;
   pointer-events: none;
 }
 
