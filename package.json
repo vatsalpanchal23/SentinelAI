@@ -4,9 +4,9 @@
   "private": false,
   "type": "module",
   "scripts": {
-    "predev": "node scripts/bootstrap.mjs",
+    "predev": "node bootstrap.js",
     "dev": "PORT=${PORT:-5173} BASE_PATH=${BASE_PATH:-/} vite --config vite.config.ts --host 0.0.0.0",
-    "prebuild": "node scripts/bootstrap.mjs",
+    "prebuild": "node bootstrap.js",
     "build": "PORT=${PORT:-5173} BASE_PATH=${BASE_PATH:-/} vite build --config vite.config.ts",
     "serve": "PORT=${PORT:-4173} BASE_PATH=${BASE_PATH:-/} vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit"
